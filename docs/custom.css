@@ -1,0 +1,118 @@
+@font-face {
+  font-family: 'Benguiat Normal';
+  src: url('assets/fonts/Benguiat Normal.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* MegaMem Documentation - Responsive Layout Improvements */
+
+/* Override docsify-themeable defaults for better responsive layout */
+
+:root {
+  /* Increase content width for better space utilization */
+  --content-max-width: 1200px;
+  --sidebar-width: 300px;
+}
+
+/* Main content area - make it wider and more responsive */
+.content {
+  max-width: var(--content-max-width) !important;
+  margin: 0 auto;
+}
+
+/* Markdown section - remove restrictive width limits */
+.markdown-section {
+  max-width: none !important;
+  padding: 30px 60px;
+  margin: 0 auto;
+}
+
+/* Responsive adjustments for different screen sizes */
+@media screen and (max-width: 1400px) {
+  .markdown-section {
+    padding: 30px 40px;
+  }
+}
+
+@media screen and (max-width: 1024px) {
+  .markdown-section {
+    padding: 30px 30px;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .markdown-section {
+    padding: 20px 20px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .markdown-section {
+    padding: 15px 15px;
+  }
+}
+
+/* Ensure sidebar doesn't interfere with content width */
+.sidebar {
+  width: var(--sidebar-width);
+}
+
+/* Adjust main content margin when sidebar is present */
+.app-nav,
+.github-corner {
+  margin-left: var(--sidebar-width);
+}
+
+/* Override any restrictive container widths */
+main {
+  width: 100%;
+  max-width: none !important;
+}
+
+/* Improve table responsiveness */
+.markdown-section table {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+  white-space: nowrap;
+}
+
+.markdown-section table thead,
+.markdown-section table tbody,
+.markdown-section table tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+/* Better spacing for code blocks */
+.markdown-section pre {
+  margin: 1.5em 0;
+}
+
+/* Improve readability with better line height */
+.markdown-section {
+  line-height: 1.6;
+}
+
+/* Custom styling for the MegaMem title in the sidebar */
+.sidebar > h1.app-name > a {
+  font-family: 'Benguiat Normal', sans-serif !important;
+  color: #FFA500 !important; /* Orange - a cleaner orange shade */
+  font-size: 1.7em !important; /* Approximately 70% larger than original default */
+  text-shadow:
+    0 0 5px rgba(255, 165, 0, 0.3), /* Orange glow effects */
+    0 0 10px rgba(255, 165, 0, 0.2),
+    0 0 15px rgba(255, 165, 0, 0.1);
+  transition: all 0.3s ease-in-out; /* Smooth transition for hover effect */
+}
+
+/* Subtle hover effect for the title */
+.sidebar > h1.app-name > a:hover {
+  text-shadow:
+    0 0 7px rgba(255, 165, 0, 1),
+    0 0 12px rgba(255, 165, 0, 0.8),
+    0 0 20px rgba(255, 165, 0, 0.6);
+}

@@ -1,0 +1,25 @@
+---
+date_created: 2025-09-23T12:04
+date_updated: 2025-09-28T11:36
+---
+- Getting Started
+  - [Introduction](README.md)
+  - [Quick Start](quick-start.md)
+  
+- Configuration
+  - [Plugin Settings](plugin-settings.md)
+  - [Ontology Manager](guides/ontology-manager.md)
+  - [Sync Manager](guides/sync-manager.md)
+  
+- Guides
+  - [Database Setup](guides/database-setup.md)
+  - [Claude Desktop Integration](guides/claude-integration.md)
+  - [Custom Entity Types](guides/custom-entities.md)
+  
+- Reference
+  - [MCP Commands](mcp-commands.md)
+  
+- About
+  - [Roadmap](roadmap.md)
+  - [Contributing](contributing.md)
+  - [FAQ](faq.md)

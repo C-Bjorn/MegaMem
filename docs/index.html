@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, minimum-scale=1.0, shrink-to-fit=no, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="A delightfully simple knowledge graph for Obsidian. Features intelligent memory graphs, seamless Claude Desktop integration, and automatic note synchronization."
+    />
+    <title>
+      MegaMem - A delightfully simple knowledge graph for Obsidian
+    </title>
+
+    <!-- Stylesheets -->
+    <!--<link
+      rel="stylesheet"
+      data-style-group="themeable"
+      href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-defaults.css"
+      disabled
+    />-->
+    <link
+      rel="stylesheet"
+      data-style-group="themeable"
+      href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple-dark.css"
+    />
+    <!--<link
+      rel="stylesheet"
+      data-style-group="themeable"
+      media="(prefers-color-scheme: light)"
+      href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css"
+    />-->
+    <link rel="stylesheet" href="custom.css" />
+    <style>
+      .lucide { width: 16px; height: 16px; vertical-align: -2px; stroke-width: 1.75; }
+      .lucide.accent { stroke: var(--theme-color); }
+    </style>
+  </head>
+
+  <body>
+    <div id="app"></div>
+
+    <script>
+      // Docsify
+      window.$docsify = {
+        // GENERAL
+        // -----------------------------------------------------------------
+        name: 'MegaMem',
+        repo: 'https://github.com/C-Bjorn/megamem-mcp',
+        coverpage: 'coverpage.md',
+        homepage: 'README.md',
+        loadSidebar: '_sidebar.md',
+
+        // NAVIGATION
+        // -----------------------------------------------------------------
+        auto2top: true,
+        maxLevel: 3,
+        subMaxLevel: 3,
+
+        // PLUGINS
+        // -----------------------------------------------------------------
+        executeScript: true,
+        search: {
+          depth: 3,
+          noData: 'No results!',
+          placeholder: 'Search...'
+        },
+        copyCode: {
+          buttonText: 'Copy',
+          errorText: 'Error copying',
+          successText: 'Copied!'
+        },
+        plugins: [
+          // Restores initial <title>
+          function persistTitle(hook, vm) {
+            var titleElm = document.querySelector('title');
+            var rootTitle = titleElm && titleElm.textContent;
+            var pageTitlePrefix = window.$docsify.name
+              ? window.$docsify.name + ' - '
+              : '';
+
+            if (rootTitle) {
+              hook.doneEach(function () {
+                var currentTitle = titleElm.textContent;
+                var isRoot = !/\/[a-z]/.test(location.hash);
+                var newTitle = isRoot
+                  ? rootTitle
+                  : pageTitlePrefix + currentTitle;
+
+                titleElm.textContent = newTitle;
+              });
+            }
+          },
+          // Lucide icons plugin
+          function lucideIcons(hook, vm) {
+            hook.doneEach(function () {
+              if (window.lucide) window.lucide.createIcons();
+            });
+          }
+        ]
+      };
+    </script>
+
+  <!-- Docsify core -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <!-- Official plugins -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/front-matter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/zoom-image.min.js"></script>
+
+  <!-- Community / optional -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2/dist/docsify-copy-code.min.js"></script>
+
+  <!-- Prism languages -->
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markdown.min.js"></script>
+  </body>
+</html>
