@@ -39,15 +39,17 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - AI-enhanced query understanding
 - Contextual result ranking and relevance scoring
 
-### Dual Database Support
+### Multi-Database Support
 
 - **Neo4j**: Industry-standard graph database for complex relationships
 - **FalkorDB**: High-performance in-memory graph database for speed
+- **Kuzu**: Coming soon
+- **Amazon Neptune**: Coming soon
 
-### Claude Desktop Integration
+### LLM Client Integraion (ie. Claude Desktop)
 
 - Native MCP (Model Context Protocol) server
-- Direct access to vault content from Claude conversations
+- Direct access to vault content from LLM conversations
 - Intelligent note creation and management through AI
 
 ### Custom Ontologies
@@ -73,22 +75,7 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 
 ## Architecture Overview
 
-```mermaid
-graph TB
-    A[Obsidian Vault] <--> B[MegaMem Plugin]
-    B <--> C[Graph Database]
-    B <--> D[LLM Provider]
-    B <--> E[MCP Server]
-    E <--> F[Claude Desktop]
-
-    C --> G[Neo4j]
-    C --> H[FalkorDB]
-
-    D --> I[OpenAI]
-    D --> J[Anthropic]
-    D --> K[Ollama]
-    D --> L[OpenRouter]
-```
+![MegaMem Architecture](_media/MegaMem-Simple-Architecture-Canvas2.png)
 
 ## Use Cases
 
@@ -118,12 +105,13 @@ graph TB
 
 ## Core Technologies
 
+- **Graphiti** - Temporal Knowlede Graph Integration
 - **TypeScript/JavaScript** - Plugin architecture and UI
 - **Python** - AI/ML processing and graph operations
 - **Svelte** - Modern reactive UI components
 - **Graph Databases** - Knowledge storage and querying
 - **Vector Embeddings** - Semantic search capabilities
-- **MCP Protocol** - Claude Desktop integration
+- **MCP Protocol** - LLM Client Desktop integrations
 
 ## Community & Support
 

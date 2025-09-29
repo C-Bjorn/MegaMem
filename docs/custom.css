@@ -116,3 +116,73 @@ main {
     0 0 12px rgba(255, 165, 0, 0.8),
     0 0 20px rgba(255, 165, 0, 0.6);
 }
+
+/* Mermaid diagram styling to match dark theme */
+.mermaid .cluster rect {
+  fill: rgba(255, 255, 255, 0.05) !important;
+  stroke: rgba(255, 165, 0, 0.3) !important;
+  stroke-width: 1px !important;
+  rx: 8px !important;
+  ry: 8px !important;
+}
+
+.mermaid .cluster text {
+  fill: rgba(255, 165, 0, 0.9) !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+}
+
+.mermaid .node rect {
+  fill: rgba(255, 255, 255, 0.08) !important;
+  stroke: rgba(255, 255, 255, 0.3) !important;
+  stroke-width: 1px !important;
+  rx: 6px !important;
+  ry: 6px !important;
+}
+
+.mermaid .node circle {
+  fill: rgba(255, 255, 255, 0.08) !important;
+  stroke: rgba(255, 255, 255, 0.3) !important;
+  stroke-width: 1px !important;
+}
+
+.mermaid .node text {
+  fill: rgba(245, 245, 245, 0.95) !important;
+  font-size: 13px !important;
+}
+
+.mermaid .edgePath path {
+  stroke: rgba(255, 165, 0, 0.6) !important;
+  stroke-width: 2px !important;
+}
+
+.mermaid .edgeLabel rect {
+  fill: rgba(40, 44, 52, 0.9) !important;
+  stroke: rgba(255, 165, 0, 0.5) !important;
+  stroke-width: 1px !important;
+  rx: 4px !important;
+  ry: 4px !important;
+}
+
+.mermaid .edgeLabel text {
+  fill: rgba(245, 245, 245, 0.9) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+
+.mermaid {
+  background: transparent !important;
+}
+
+/* Special styling for highlighted nodes */
+.mermaid .node.highlight rect {
+  fill: rgba(255, 165, 0, 0.9) !important;
+  stroke: rgba(255, 165, 0, 1) !important;
+  stroke-width: 2px !important;
+}
+
+.mermaid .node.highlight text {
+  fill: rgba(0, 0, 0, 0.9) !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+}

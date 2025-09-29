@@ -1,17 +1,13 @@
----
-date_created: 2025-09-23T19:28
-date_updated: 2025-09-28T11:36
----
-# MegaMem
+# MegaMem MCP
 
-> Incredibly Powerful, Flexible & Private
+> Obsidian MCP with SuperPowers
 
-AI Knowledge Graph for Obsidian  
+GraphRAG for your SecondBrain  
 Claude Desktop Integration via MCP  
 Multi-Database Support  
 Automatic Ontologies  
 100% Private AI (Optional)
 
-[Get Started](quick-start.md ":size=200")
-[Demo](demo.md ":ignore")
-[GitHub](https://github.com/C-Bjorn/megamem-mcp ":ignore")
+[Get Started](README.md ":size=200")
+[Demo](https://endogon.org/megamem ":ignore")
+[GitHub](https://github.com/C-Bjorn/MegaMem ":ignore")
