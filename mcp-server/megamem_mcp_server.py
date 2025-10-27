@@ -3,7 +3,7 @@
 Obsidian MegaMem MCP Server - Complete Implementation
 
 Built from scratch using mcp + graphiti-core directly.
-Provides 8 MegaMem tools + 5 Obsidian WebSocket tools = 13 total tools.
+Provides 9 MegaMem tools + 9 Obsidian WebSocket tools = 18 total tools.
 """
 
 import sys
@@ -49,7 +49,12 @@ try:
     from graphiti_core import Graphiti
     from graphiti_core.nodes import EpisodeType
     from graphiti_core.edges import EntityEdge
-    from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
+    from graphiti_core.search.search_config_recipes import (
+        NODE_HYBRID_SEARCH_RRF,
+        NODE_HYBRID_SEARCH_NODE_DISTANCE,
+        EDGE_HYBRID_SEARCH_RRF,
+        EDGE_HYBRID_SEARCH_NODE_DISTANCE
+    )
     from graphiti_core.search.search_filters import SearchFilters
 except ImportError as e:
     logging.critical(f"FATAL: Could not import graphiti-core: {e}")
@@ -67,7 +72,7 @@ except ImportError:
 try:
     from graphiti_bridge.config import BridgeConfig, setup_environment_variables
     from graphiti_bridge.sync import initialize_graphiti as init_megamem_bridge
-    from graphiti_bridge.models import get_entity_types
+    from graphiti_bridge.models import get_entity_types_with_config
 except ImportError as e:
     logging.critical(f"FATAL: Could not import graphiti_bridge modules: {e}")
     sys.exit(1)
@@ -104,9 +109,9 @@ OBSIDIAN_FILE_OPERATIONS = {
 
 class ObsidianMegaMemMCPServer:
     """
-    Complete MCP server providing 13 tools:
-    - 8 Graphiti graph operations
-    - 5 Obsidian file operations via WebSocket
+    Complete MCP server providing 18 tools:
+    - 9 Graphiti graph operations (including conversation memory)
+    - 9 Obsidian file operations via WebSocket
     """
 
     def __init__(self):
@@ -122,6 +127,9 @@ class ObsidianMegaMemMCPServer:
         self.initialization_complete = False
         self.resource_loading_task = None
         self.ready_event = asyncio.Event()
+        
+        self.episode_queues: Dict[str, asyncio.Queue] = {}
+        self.queue_workers: Dict[str, bool] = {}
 
         # Register all tool handlers
         self._register_tool_handlers()
@@ -131,13 +139,13 @@ class ObsidianMegaMemMCPServer:
 
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
-            """Return all 13 tools - 8 Graphiti + 5 Obsidian"""
+            """Return all 18 tools - 9 Graphiti + 9 Obsidian"""
             tools = []
 
-            # Add 8 Graphiti tools
+            # Add 9 Graphiti tools
             tools.extend(self._get_megamem_tool_definitions())
 
-            # Add 5 Obsidian tools
+            # Add 9 Obsidian tools
             tools.extend(self._get_obsidian_tool_definitions())
 
             logger.info(
@@ -162,8 +170,31 @@ class ObsidianMegaMemMCPServer:
                     text=json.dumps({"success": False, "error": str(e)})
                 )]
 
+        @self.server.list_resources()
+        async def list_resources() -> List[types.Resource]:
+            """Return health check resource"""
+            return [types.Resource(
+                uri="megamem://status",
+                name="MegaMem Server Status",
+                description="Health check for Graphiti and Obsidian connections"
+            )]
+
+        @self.server.read_resource()
+        async def read_resource(uri: str) -> str:
+            """Read health check resource"""
+            if uri == "megamem://status":
+                status = {
+                    "graphiti": "ok" if self.megamem_client and self.megamem_client != "RPC_MODE" else "disconnected",
+                    "obsidian": "ok" if self.file_tools else "disconnected",
+                    "database": self.bridge_config.database_type if self.bridge_config else "unknown"
+                }
+                
+                return json.dumps(status, indent=2)
+            
+            raise ValueError(f"Unknown resource URI: {uri}")
+
     def _get_megamem_tool_definitions(self) -> List[Tool]:
-        """Define all 8 Graphiti tools"""
+        """Define all 9 Graphiti tools"""
         return [
             Tool(
                 name="add_memory",
@@ -190,7 +221,9 @@ class ObsidianMegaMemMCPServer:
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
                         "max_nodes": {"type": "integer", "description": "Max results", "default": 10},
-                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"}
+                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"},
+                        "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"},
+                        "entity_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by entity types (e.g., ['Person', 'Company'])"}
                     },
                     "required": ["query"]
                 }
@@ -203,7 +236,8 @@ class ObsidianMegaMemMCPServer:
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
                         "max_facts": {"type": "integer", "description": "Max results", "default": 10},
-                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"}
+                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"},
+                        "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"}
                     },
                     "required": ["query"]
                 }
@@ -262,6 +296,32 @@ class ObsidianMegaMemMCPServer:
                 name="list_group_ids",
                 description="List all available group IDs (namespaces) in the vault (aliases: mm, megamem, memory)",
                 inputSchema={"type": "object", "properties": {}}
+            ),
+            Tool(
+                name="add_conversation_memory",
+                description="Add a conversation to the graph using Graphiti's message format. CLIENT provides summaries for assistant messages - server formats and stores. (aliases: mm, megamem, memory)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Name for conversation episode"},
+                        "conversation": {
+                            "type": "array",
+                            "description": "Array of message objects",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "role": {"type": "string", "enum": ["user", "assistant"], "description": "Message role"},
+                                    "content": {"type": "string", "description": "Message content"},
+                                    "timestamp": {"type": "string", "description": "Optional ISO 8601 timestamp"}
+                                },
+                                "required": ["role", "content"]
+                            }
+                        },
+                        "group_id": {"type": "string", "description": "Group ID for organizing memories"},
+                        "source_description": {"type": "string", "description": "Source description", "default": "Conversation memory from MCP"}
+                    },
+                    "required": ["conversation"]
+                }
             )
         ]
 
@@ -304,7 +364,12 @@ class ObsidianMegaMemMCPServer:
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Note path"},
-                        "vault_id": {"type": "string", "description": "Vault ID (optional)"}
+                        "vault_id": {"type": "string", "description": "Vault ID (optional)"},
+                        "include_line_map": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Include line-by-line mapping and section detection for precise editing (increases response size ~2x)"
+                        }
                     },
                     "required": ["path"]
                 }
@@ -314,18 +379,39 @@ class ObsidianMegaMemMCPServer:
                 description="""Update content of an existing note using various editing modes (aliases: mv, my vault, obsidian).
 
 Editing Modes:
-- full_file: Replace entire file content (default, backward compatible)
+- full_file: Replace entire file content (default)
 - frontmatter_only: Update only YAML frontmatter properties
 - append_only: Append content to end of file
-- range_based: Replace content within specific line/character ranges
-- editor_based: Use predefined editor methods like insert_after_heading
+- range_based: Replace content within specific line ranges
+- editor_based: Use predefined editor methods
 
 Required parameters vary by mode:
 - full_file: path, content
 - frontmatter_only: path, frontmatter_changes
 - append_only: path, append_content
 - range_based: path, replacement_content, range_start_line, range_start_char
-- editor_based: path, editor_method (+ method-specific parameters)""",
+- editor_based: path, editor_method (plus method-specific parameters)
+
+MANDATORY WORKFLOW FOR range_based MODE:
+Before using range_based editing, you MUST follow this exact sequence:
+
+1. Call read_obsidian_note WITH include_line_map=true to get line numbers
+2. Use the returned metadata.lineMap to identify exact line positions
+3. Verify the target content matches your intent
+4. Execute the range_based edit with verified line numbers
+
+The include_line_map parameter returns:
+- metadata.lineMap: {"1": "line content", "2": "line content", ...}
+- metadata.sections: [{name: "frontmatter", startLine: 1, endLine: 5}, {name: "body", startLine: 6, endLine: 100}]
+- metadata.totalLines: total line count
+
+Critical reminders:
+- NEVER attempt range_based editing without first reading with include_line_map=true
+- Use lineMap to verify exact content at each line number
+- Blank lines and frontmatter are included in line numbers
+- The lineMap eliminates manual counting errors
+
+Example: To edit line 38, first call read_obsidian_note with include_line_map=true, then check metadata.lineMap["38"] to verify content, then specify range_start_line=38.""",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -504,6 +590,23 @@ WORKFLOW:
             )
         ]
 
+    async def process_episode_queue(self, group_id: str):
+        """Process episodes for a group_id sequentially"""
+        self.queue_workers[group_id] = True
+        try:
+            while True:
+                process_func = await self.episode_queues[group_id].get()
+                try:
+                    await process_func()
+                except Exception as e:
+                    logger.error(f"Episode processing error for {group_id}: {e}")
+                finally:
+                    self.episode_queues[group_id].task_done()
+        except asyncio.CancelledError:
+            logger.info(f"Queue worker for {group_id} cancelled")
+        finally:
+            self.queue_workers[group_id] = False
+
     def _format_fact_result(self, edge: Any) -> Dict[str, Any]:
         """Formats an EntityEdge into a serializable dictionary."""
         if not hasattr(edge, 'model_dump'):
@@ -552,72 +655,94 @@ WORKFLOW:
 
         try:
             if name == "add_memory":
-                # Map content parameter to episode_body for backward compatibility
-                episode_body = arguments["content"]
+                group_id_str = arguments.get("group_id") or self.bridge_config.default_namespace
+                
+                async def process_episode():
+                    # Map content parameter to episode_body for backward compatibility
+                    episode_body = arguments["content"]
 
-                # Generate default name if not provided
-                name_param = arguments.get("name")
-                if not name_param:
-                    name_param = f"Episode_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    # Generate default name if not provided
+                    name_param = arguments.get("name")
+                    if not name_param:
+                        name_param = f"Episode_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-                # Map source string to EpisodeType enum
-                source_str = arguments.get("source", "text")
-                source_type = EpisodeType.text
-                if source_str.lower() == "message":
-                    source_type = EpisodeType.message
-                elif source_str.lower() == "json":
-                    source_type = EpisodeType.json
+                    # Map source string to EpisodeType enum
+                    source_str = arguments.get("source", "text")
+                    source_type = EpisodeType.text
+                    if source_str.lower() == "message":
+                        source_type = EpisodeType.message
+                    elif source_str.lower() == "json":
+                        source_type = EpisodeType.json
 
-                # Read config to check for custom ontology usage
-                config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
-                if not config_path:
-                    raise ValueError("OBSIDIAN_CONFIG_PATH not set")
-                logger.info(f"Loading config from: {config_path}")
-                with open(config_path, 'r') as f:
-                    obsidian_config = json.load(f)
+                    # Read config to check for custom ontology usage
+                    config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
+                    if not config_path:
+                        raise ValueError("OBSIDIAN_CONFIG_PATH not set")
+                    logger.info(f"Loading config from: {config_path}")
+                    with open(config_path, 'r') as f:
+                        obsidian_config = json.load(f)
 
-                entity_types = {}
-                use_custom = obsidian_config.get('useCustomOntology')
-                if use_custom:
-                    logger.info(
-                        "[INFO] Custom ontology enabled. Loading custom entity types.")
-                    entity_types = get_entity_types(obsidian_config)
-                else:
-                    logger.info("[INFO] Custom ontology disabled.")
+                    entity_types = {}
+                    use_custom = obsidian_config.get('useCustomOntology')
+                    if use_custom:
+                        logger.info("[INFO] Custom ontology enabled. Loading custom entity types.")
+                        entity_types = get_entity_types_with_config(obsidian_config)
+                    else:
+                        logger.info("[INFO] Custom ontology disabled.")
 
-                logger.info(
-                    f"Entity types loaded: {list(entity_types.keys())}")
-                logger.info(f"Number of entity types: {len(entity_types)}")
+                    logger.info(f"Entity types loaded: {list(entity_types.keys())}")
+                    logger.info(f"Number of entity types: {len(entity_types)}")
 
-                episode_kwargs = {
-                    'name': name_param,
-                    'episode_body': episode_body,
-                    'source': source_type,
-                    'source_description': arguments.get('source_description', "MCP server memory addition"),
-                    'group_id': arguments.get('group_id') or self.bridge_config.default_namespace,
-                    'uuid': arguments.get('uuid'),
-                    'reference_time': datetime.now(timezone.utc),
-                    'entity_types': entity_types
-                }
-                result = await self.megamem_client.add_episode(**episode_kwargs)
+                    episode_kwargs = {
+                        'name': name_param,
+                        'episode_body': episode_body,
+                        'source': source_type,
+                        'source_description': arguments.get('source_description', "MCP server memory addition"),
+                        'group_id': group_id_str,
+                        'uuid': arguments.get('uuid'),
+                        'reference_time': datetime.now(timezone.utc),
+                        'entity_types': entity_types
+                    }
+                    await self.megamem_client.add_episode(**episode_kwargs)
+                
+                # Queue management
+                if group_id_str not in self.episode_queues:
+                    self.episode_queues[group_id_str] = asyncio.Queue()
+                
+                position = self.episode_queues[group_id_str].qsize() + 1
+                await self.episode_queues[group_id_str].put(process_episode)
+                
+                if not self.queue_workers.get(group_id_str, False):
+                    asyncio.create_task(self.process_episode_queue(group_id_str))
+                
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
-                    "episode_id": str(result.episode.uuid),
-                    "message": "Memory added successfully"
+                    "message": f"Episode queued (position: {position})"
                 }))]
 
             elif name == "search_memory_nodes":
                 group_ids = arguments.get('group_ids') or [
                     self.bridge_config.default_namespace]
                 max_nodes = arguments.get("max_nodes", 10)
+                center_node_uuid = arguments.get("center_node_uuid")
+                entity_types = arguments.get("entity_types", [])
 
-                search_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+                if center_node_uuid:
+                    search_config = NODE_HYBRID_SEARCH_NODE_DISTANCE.model_copy(deep=True)
+                else:
+                    search_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
                 search_config.limit = max_nodes
+
+                filters = SearchFilters()
+                if entity_types:
+                    filters.node_labels = entity_types
 
                 results = await self.megamem_client._search(
                     query=arguments["query"],
                     config=search_config,
-                    group_ids=group_ids
+                    group_ids=group_ids,
+                    center_node_uuid=center_node_uuid,
+                    search_filter=filters
                 )
 
                 formatted_nodes = [{
@@ -639,15 +764,23 @@ WORKFLOW:
                 group_ids = arguments.get('group_ids') or [
                     self.bridge_config.default_namespace]
                 max_facts = arguments.get("max_facts", 10)
+                center_node_uuid = arguments.get("center_node_uuid")
 
-                results = await self.megamem_client.search(
+                if center_node_uuid:
+                    search_config = EDGE_HYBRID_SEARCH_NODE_DISTANCE.model_copy(deep=True)
+                else:
+                    search_config = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+                search_config.limit = max_facts
+
+                results = await self.megamem_client._search(
                     query=arguments["query"],
+                    config=search_config,
                     group_ids=group_ids,
-                    num_results=max_facts
+                    center_node_uuid=center_node_uuid
                 )
 
                 formatted_facts = [self._format_fact_result(
-                    edge) for edge in results]
+                    edge) for edge in results.edges]
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
                     "facts": formatted_facts
@@ -816,6 +949,75 @@ WORKFLOW:
                         "error": f"Failed to list group IDs: {str(e)}"
                     }))]
 
+            elif name == "add_conversation_memory":
+                conversation = arguments.get("conversation")
+                if not conversation or not isinstance(conversation, list):
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": "conversation parameter required and must be an array"
+                    }))]
+
+                # Format each message as "[timestamp] role: content"
+                formatted_lines = []
+                for msg in conversation:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+                    timestamp = msg.get("timestamp")
+                    
+                    if not timestamp:
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                    
+                    formatted_lines.append(f"[{timestamp}] {role}: {content}")
+                
+                episode_body = "\n".join(formatted_lines)
+                
+                # Generate name if not provided
+                name_param = arguments.get("name")
+                if not name_param:
+                    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+                    name_param = f"Conversation_{timestamp}"
+                
+                # Get group_id or use default
+                group_id = arguments.get("group_id") or self.bridge_config.default_namespace
+                
+                # Get source_description
+                source_description = arguments.get("source_description", "Conversation memory from MCP")
+                
+                # Read config for custom ontology
+                config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
+                if not config_path:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": "OBSIDIAN_CONFIG_PATH not set"
+                    }))]
+                
+                with open(config_path, 'r') as f:
+                    obsidian_config = json.load(f)
+                
+                entity_types = {}
+                if obsidian_config.get('useCustomOntology'):
+                    entity_types = get_entity_types_with_config(obsidian_config)
+                
+                # Add episode with message source type
+                episode_kwargs = {
+                    'name': name_param,
+                    'episode_body': episode_body,
+                    'source': EpisodeType.message,
+                    'source_description': source_description,
+                    'group_id': group_id,
+                    'reference_time': datetime.now(timezone.utc),
+                    'entity_types': entity_types
+                }
+                
+                result = await self.megamem_client.add_episode(**episode_kwargs)
+                
+                return [types.TextContent(type="text", text=json.dumps({
+                    "success": True,
+                    "episode_id": str(result.episode.uuid),
+                    "message": "Conversation memory added successfully",
+                    "message_count": len(conversation)
+                }))]
+
             else:
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": False,
@@ -879,6 +1081,8 @@ WORKFLOW:
                     normalized_key = "max_results"
                 if k in ("include_context", "includeContext"):
                     normalized_key = "include_context"
+                if k in ("include_line_map", "includeLineMap"):
+                    normalized_key = "include_line_map"
                 # Pass through editing mode parameters for update_obsidian_note
                 if k in ("editing_mode", "frontmatter_changes", "append_content", "replacement_content",
                          "range_start_line", "range_start_char", "range_end_line", "range_end_char", "editor_method"):
@@ -942,7 +1146,7 @@ WORKFLOW:
     async def initialize(self):
         """Initialize both Graphiti client and WebSocket server with discovery and fallback"""
         logger.info(
-            "[START] Initializing Obsidian MegaMem MCP Server with 13 tools...")
+            "[START] Initializing Obsidian MegaMem MCP Server with 18 tools...")
 
         try:
             config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
@@ -997,7 +1201,7 @@ WORKFLOW:
             logger.info(
                 f"[COMPLETE] MCP Server ready! WebSocket: {websocket_status} | MegaMem: Loading in background")
             logger.info(
-                "[INFO] All 13 tools available: 8 Graphiti + 5 Obsidian")
+                "[INFO] All 18 tools available: 9 Graphiti + 9 Obsidian")
 
         except Exception as e:
             logger.critical(
@@ -1012,7 +1216,7 @@ WORKFLOW:
             logger.info("[BACKGROUND] Starting MegaMem client initialization...")
             setup_environment_variables(bridge_config)
             
-            megamem_client = init_megamem_bridge(bridge_config, debug=True)
+            megamem_client = await init_megamem_bridge(bridge_config, debug=True)
             if not megamem_client:
                 raise ValueError("MegaMem client initialization failed (returned None).")
             self.megamem_client = megamem_client
@@ -1547,7 +1751,7 @@ WORKFLOW:
 
 
 async def main():
-    """Main entry point for the complete MCP server with 13 tools"""
+    """Main entry point for the complete MCP server with 18 tools"""
     try:
         # Create and initialize the server
         mcp_server = ObsidianMegaMemMCPServer()

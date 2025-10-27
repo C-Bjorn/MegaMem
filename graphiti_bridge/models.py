@@ -572,7 +572,7 @@ def ensure_loader_initialized() -> bool:
 
         logging.info("Initializing global loader...")
         try:
-            from graphiti_bridge.config import get_vault_path
+            from .config import get_vault_path
             vault_path = get_vault_path()
 
             if not vault_path:
@@ -718,9 +718,9 @@ def get_entity_types_with_config(obsidian_config: Dict[str, Any]) -> Dict[str, T
                 # Previously this used 'obsidian-graphiti-mcp' — support both ids and derive vault path accordingly.
                 cfg_path = Path(config_path)
                 # If config_path points inside a plugin directory, climb up to vault root
-                # Example: vault/.obsidian/plugins/megamem-mcp/data.json -> vault root is 3 parents up
+                # Example: vault/.obsidian/plugins/megamem-mcp/data.json -> vault root is 4 parents up
                 if 'plugins' in str(cfg_path):
-                    vault_path = str(cfg_path.parent.parent.parent)
+                    vault_path = str(cfg_path.parent.parent.parent.parent)
                 else:
                     vault_path = str(cfg_path)
                 logging.info(f"Derived vault path: {vault_path}")

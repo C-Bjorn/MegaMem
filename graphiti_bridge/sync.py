@@ -116,39 +116,21 @@ OPENAI_EMBEDDER_AVAILABLE = True
 OLLAMA_EMBEDDER_AVAILABLE = True  # Always available since it uses OpenAIEmbedder
 
 
-# Import local modules with fallback for direct execution
-try:
-    # Try relative imports first (when run as part of package)
-    from .config import BridgeConfig, load_config_from_stdin, setup_environment_variables
-    from .utils import (
-        setup_logging,
-        format_success_response,
-        format_error_response,
-        extract_frontmatter,
-        extract_text_content,
-        validate_note_file,
-        print_json_response,
-        print_final_json_response,
-        print_error_and_exit
-    )
-    from .models import initialize_global_loader, get_node_types, get_edge_types, get_entity_type_definitions, get_edge_type_definitions, get_edge_type_map, get_graphiti_entity_types, get_graphiti_edge_types, get_graphiti_edge_type_map
-    from .openrouter_client import OpenRouterClient, InfrastructureError
-except ImportError:
-    # Fall back to absolute imports (when run directly)
-    from config import BridgeConfig, load_config_from_stdin, setup_environment_variables
-    from utils import (
-        setup_logging,
-        format_success_response,
-        format_error_response,
-        extract_frontmatter,
-        extract_text_content,
-        validate_note_file,
-        print_json_response,
-        print_final_json_response,
-        print_error_and_exit
-    )
-    from models import initialize_global_loader, get_node_types, get_edge_types, get_entity_type_definitions, get_edge_type_definitions, get_edge_type_map, get_graphiti_entity_types, get_graphiti_edge_types, get_graphiti_edge_type_map
-    from openrouter_client import OpenRouterClient, InfrastructureError
+# Import local modules - always use relative imports (production-safe)
+from .config import BridgeConfig, load_config_from_stdin, setup_environment_variables
+from .utils import (
+    setup_logging,
+    format_success_response,
+    format_error_response,
+    extract_frontmatter,
+    extract_text_content,
+    validate_note_file,
+    print_json_response,
+    print_final_json_response,
+    print_error_and_exit
+)
+from .models import initialize_global_loader, get_node_types, get_edge_types, get_entity_type_definitions, get_edge_type_definitions, get_edge_type_map, get_graphiti_entity_types, get_graphiti_edge_types, get_graphiti_edge_type_map
+from .openrouter_client import OpenRouterClient, InfrastructureError
 
 
 async def main():
@@ -254,12 +236,12 @@ async def main():
                 # If plugin_data_path points directly to data.json, derive vault root
                 pdp = Path(plugin_data_path)
                 if pdp.name == 'data.json' and 'plugins' in str(pdp):
-                    # vault/.obsidian/plugins/<plugin-id>/data.json -> vault is 3 parents up
-                    init_vault_path = str(pdp.parent.parent.parent)
+                    # vault/.obsidian/plugins/<plugin-id>/data.json -> vault is 4 parents up
+                    init_vault_path = str(pdp.parent.parent.parent.parent)
                 elif 'plugins' in str(pdp):
                     # If path contains 'plugins', assume it's a plugin directory: vault/.obsidian/plugins/<plugin-id>
-                    # Need to go up 3 levels to reach vault root
-                    init_vault_path = str(pdp.parent.parent.parent)
+                    # Need to go up 4 levels to reach vault root
+                    init_vault_path = str(pdp.parent.parent.parent.parent)
                 else:
                     # Otherwise assume provided path is vault root or derive accordingly
                     init_vault_path = str(pdp)
@@ -291,7 +273,7 @@ async def main():
         graphiti_init_start = time.time()
         if debug_mode:
 
-        graphiti = initialize_graphiti(config, config.debug)
+        graphiti = await initialize_graphiti(config, config.debug)
         if not graphiti:
             print_error_and_exit("Failed to initialize Graphiti")
 
@@ -803,10 +785,12 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
         return create_disabled_cross_encoder()
 
 
-def initialize_graphiti(config: BridgeConfig, debug: bool = False):
+async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
     """
     Initialize Graphiti with the provided configuration.
     This function now directly instantiates LLM and Embedder clients based on config.
+    
+    NOTE: This function is async in Graphiti 0.22+ to support async driver initialization.
     """
     logger = logging.getLogger('graphiti_bridge.sync')
 
@@ -1128,12 +1112,14 @@ def initialize_graphiti(config: BridgeConfig, debug: bool = False):
         return None
 
 
-def init_graphiti_bridge(config: BridgeConfig, debug: bool = False):
+async def init_graphiti_bridge(config: BridgeConfig, debug: bool = False):
     """
     Public wrapper function for initializing Graphiti from external modules (like MCP server).
 
     This function provides a clean interface for the MCP server to initialize Graphiti
     using the same proven configuration and provider support.
+    
+    NOTE: This function is async in Graphiti 0.22+ to support async driver initialization.
 
     Args:
         config: BridgeConfig instance with provider and database settings
@@ -1142,7 +1128,7 @@ def init_graphiti_bridge(config: BridgeConfig, debug: bool = False):
     Returns:
         Graphiti instance or None if initialization fails
     """
-    return initialize_graphiti(config, debug)
+    return await initialize_graphiti(config, debug)
 
 
 def extract_episode_uuid_from_result(graphiti_result, debug_mode: bool, logger) -> Optional[str]:

@@ -508,14 +508,14 @@ async def test_combination_with_pipeline(config: BridgeConfig) -> Tuple[bool, st
     start_time = time.time()
 
     try:
-        from sync import initialize_graphiti
+        from .sync import initialize_graphiti
         from graphiti_core.nodes import EpisodeType
         from datetime import datetime, timezone
 
         setup_environment_variables(config)
 
         # Initialize Graphiti using the same path as sync.py
-        graphiti = initialize_graphiti(config, debug=False)
+        graphiti = await initialize_graphiti(config, debug=False)
         if not graphiti:
             return False, f"Failed to initialize Graphiti for pipeline test", get_latency_ms(start_time)
 
@@ -644,12 +644,12 @@ async def test_schema_initialization(config: BridgeConfig) -> Tuple[bool, str, i
 
     try:
         # Import Graphiti initialization from sync module
-        from sync import initialize_graphiti
+        from .sync import initialize_graphiti
 
         setup_environment_variables(config)
 
         # Initialize Graphiti instance
-        graphiti = initialize_graphiti(config, debug=True)
+        graphiti = await initialize_graphiti(config, debug=True)
         if not graphiti:
             return False, "Failed to initialize Graphiti instance", get_latency_ms(start_time)
 
@@ -773,10 +773,10 @@ def main():
             # @output: prints JSON with 'episode_uuid' on success
             try:
                 # Import initialize_graphiti and helper from sync to ensure identical initialization path
-                from sync import initialize_graphiti, extract_episode_uuid_from_result
+                from .sync import initialize_graphiti, extract_episode_uuid_from_result
                 setup_environment_variables(config)
                 # Initialize Graphiti (debug=True to surface errors in structured output)
-                graphiti = initialize_graphiti(config, debug=True)
+                graphiti = asyncio.run(initialize_graphiti(config, debug=True))
                 if not graphiti:
                     print_json_response(
                         {'success': False, 'message': 'Failed to initialize Graphiti for episode-test', 'latency': 0})

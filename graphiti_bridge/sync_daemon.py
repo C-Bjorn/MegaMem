@@ -105,12 +105,12 @@ def log_timing_summary():
 
 # Import config helpers (conforms with sync.py usage)
 with time_operation("config_import", "imports"):
-    from config import BridgeConfig, setup_environment_variables
+    from .config import BridgeConfig, setup_environment_variables
 
 # Import sync module to reuse its internal pipeline functions (no stdout contamination)
 # Note: This will trigger granular import timing from sync.py when GRAPHITI_LOG_PERFORMANCE=true
 with time_operation("sync_module_import", "imports"):
-    import sync  # graphiti_bridge/sync.py
+    from . import sync  # graphiti_bridge/sync.py
 
 # Minimal logger per Day27.01_Python-Logging-Refactor (stderr only)
 logger = logging.getLogger("graphiti_bridge.sync_daemon")
@@ -188,17 +188,17 @@ class SyncDaemon:
         try:
             # Initialize custom ontology if enabled (matches sync.py main() logic)
             if cfg.use_custom_ontology and cfg.vault_path:
-                from models import initialize_global_loader
+                from .models import initialize_global_loader
                 if not initialize_global_loader(cfg.vault_path):
                     logger.warning("[DAEMON] Failed to initialize custom ontology loader")
                 else:
                     
                     # Verify global loader initialization with lazy loading
-                    from models import get_entity_types
+                    from .models import get_entity_types
                     entity_types = get_entity_types()
             else:
             
-            graphiti = sync.initialize_graphiti(cfg, cfg.debug)
+            graphiti = await sync.initialize_graphiti(cfg, cfg.debug)
             if not graphiti:
                 return self._build_result_error("Failed to initialize Graphiti")
 

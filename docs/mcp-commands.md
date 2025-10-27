@@ -4,7 +4,7 @@ date_updated: 2025-09-28T11:36
 ---
 # MCP Commands Reference
 
-This document lists all 18 available commands (tools) provided by the MegaMem MCP server: 9 MegaMem Graph Operations and 9 Obsidian WebSocket File Operations. Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian WebSocket File Operations. Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -25,6 +25,47 @@ Add a memory/episode to the graph (aliases: mm, megamem, memory)
 | `group_id` | `string` | Group ID for organizing memories | No | |
 | `uuid` | `string` | Optional UUID for the episode | No | |
 | `namespace` | `string` | DEPRECATED: Use group_id instead | No | `megamem-vault` |
+
+### `add_conversation_memory`
+
+Stores conversations in Graphiti memory using the message episode type. Client (Claude) provides pre-summarized assistant responses. Messages are stored in format: `[timestamp] role: content` (aliases: mm, megamem, memory)
+
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `name` | `string` | Name for the conversation episode | No | Auto-generates `Conversation_YYYYMMDD_HHMMSS` |
+| `conversation` | `array` | Array of message objects (see below) | Yes | |
+| `group_id` | `string` | Group ID for organizing memories | No | |
+| `source_description` | `string` | Description of conversation source | No | `Conversation memory from MCP` |
+
+**Message Object Structure:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `role` | `string` | Message role: "user" or "assistant" | Yes | |
+| `content` | `string` | Full message for user; concise summary for assistant | Yes | |
+| `timestamp` | `string` | ISO 8601 timestamp | No | Current UTC time |
+
+**Example:**
+
+```json
+{
+  "name": "Product Discussion 2025-10-27",
+  "conversation": [
+    {
+      "role": "user",
+      "content": "What features should we prioritize?",
+      "timestamp": "2025-10-27T14:30:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Recommended authentication improvements based on user feedback",
+      "timestamp": "2025-10-27T14:30:15Z"
+    }
+  ]
+}
+```
 
 ### `search_memory_nodes`
 

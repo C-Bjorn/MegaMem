@@ -152,8 +152,14 @@ class FileTools:
         response = await self.server.request_file_operation(resolved_vault_id, "file:search", params)
         return response or {"error": "No response from vault"}
 
-    async def read_obsidian_note(self, path: str, vault_id: Optional[str] = None) -> Dict[str, Any]:
-        """Read a specific note from Obsidian."""
+    async def read_obsidian_note(self, path: str, vault_id: Optional[str] = None, include_line_map: bool = False) -> Dict[str, Any]:
+        """Read a specific note from Obsidian.
+        
+        Args:
+            path: Path to the note
+            vault_id: Optional vault ID
+            include_line_map: Include line-by-line mapping for precise editing (increases response size)
+        """
         # Validate vault connection
         resolved_vault_id, error = await self._validate_vault_connection(vault_id)
         if error is not None:
@@ -168,6 +174,57 @@ class FileTools:
         }
 
         response = await self.server.request_file_operation(resolved_vault_id, "file:read", params)
+        
+        if include_line_map and response and response.get("success") and "payload" in response:
+            content = response["payload"].get("content", "")
+            lines = content.split('\n')
+            
+            # Generate line map
+            line_map = {str(i+1): line for i, line in enumerate(lines)}
+            
+            # Detect frontmatter and body sections
+            sections = []
+            in_frontmatter = False
+            frontmatter_start = -1
+            
+            for i, line in enumerate(lines, 1):
+                if line.strip() == "---":
+                    if not in_frontmatter and i == 1:
+                        in_frontmatter = True
+                        frontmatter_start = i
+                    elif in_frontmatter:
+                        sections.append({
+                            "name": "frontmatter",
+                            "startLine": frontmatter_start,
+                            "endLine": i
+                        })
+                        in_frontmatter = False
+                        break
+            
+            # Add body section if exists
+            if sections and sections[-1]["endLine"] < len(lines):
+                sections.append({
+                    "name": "body",
+                    "startLine": sections[-1]["endLine"] + 1,
+                    "endLine": len(lines)
+                })
+            elif not sections and lines:
+                sections.append({
+                    "name": "body",
+                    "startLine": 1,
+                    "endLine": len(lines)
+                })
+            
+            # Inject metadata
+            if "metadata" not in response["payload"]:
+                response["payload"]["metadata"] = {}
+            
+            response["payload"]["metadata"].update({
+                "totalLines": len(lines),
+                "lineMap": line_map,
+                "sections": sections
+            })
+        
         return response or {"error": "No response from vault"}
 
     async def update_obsidian_note(
