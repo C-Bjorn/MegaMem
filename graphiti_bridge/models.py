@@ -752,10 +752,16 @@ def get_entity_types_with_config(obsidian_config: Dict[str, Any]) -> Dict[str, T
         else:
             logging.warning(
                 f"Failed to load models from vault path: {vault_path}")
+            # @vessel-protocol:Baldr governs:fix context:Use loader's resolved data.json path instead of hard-coded fallback
+            # @inter-dependencies: [DynamicModelLoader.data_json_path]
+            # @purpose: Show which data.json path the loader actually checked, avoiding hard-coded plugin id
+            # @result: Error logs now display the loader's chosen path (with plugin id probing logic)
+            # @signed: C.Bjørn
             logging.info(
                 f"Loader checked data.json at: {temp_loader.data_json_path}")
             logging.info(
                 f"data.json exists: {temp_loader.data_json_path.exists()}")
+            # @vessel-close:Baldr
             return {}
 
     except Exception as e:

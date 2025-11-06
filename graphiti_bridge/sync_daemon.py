@@ -29,6 +29,7 @@ PERF_TIMING_PREFIX = "[PERF-TIMING]"
 _timing_data = {}
 _daemon_start_time = time.perf_counter()
 
+# @purpose: Performance timing utilities for daemon startup bottleneck analysis
 # @depends: time.perf_counter, logging, ENABLE_PERF_TIMING
 # @results: Structured timing data logged to stderr for optimization analysis
 
@@ -65,6 +66,7 @@ def time_operation(operation_name: str, category: str = "general"):
         # Log timing data to stderr with structured format
         # Handle case where logger might not be initialized yet during early imports
         try:
+            logger.debug(
                 f"{PERF_TIMING_PREFIX} {category}.{operation_name}: {duration*1000:.2f}ms (offset: {start_offset*1000:.2f}ms)")
         except NameError:
             # Logger not yet defined, use print to stderr
@@ -79,14 +81,17 @@ def log_timing_summary():
     total_time = time.perf_counter() - _daemon_start_time
     # Handle case where logger might not be initialized yet
     try:
+        logger.debug(
             f"{PERF_TIMING_PREFIX} SUMMARY: Total daemon startup: {total_time*1000:.2f}ms")
 
         for category, operations in _timing_data.items():
             category_total = sum(op['duration_ms'] for op in operations)
+            logger.debug(
                 f"{PERF_TIMING_PREFIX} CATEGORY {category}: {category_total:.2f}ms total")
 
             for op in operations:
                 percentage = (op['duration_ms'] / (total_time * 1000)) * 100
+                logger.debug(
                     f"{PERF_TIMING_PREFIX}   {op['operation']}: {op['duration_ms']:.2f}ms ({percentage:.1f}%)")
     except NameError:
         # Logger not yet defined, use print to stderr
@@ -162,6 +167,7 @@ class SyncDaemon:
                     _t0 = time.time()
                     _ = BGERerankerClient()  # warm-up
                     dt = time.time() - _t0
+                    logger.debug(f"[DAEMON] BGE warm-up complete in {dt:.2f}s")
 
                 self.bge_loaded = True
                 return True
@@ -187,16 +193,21 @@ class SyncDaemon:
         """
         try:
             # Initialize custom ontology if enabled (matches sync.py main() logic)
+            logger.debug(f"[DAEMON] Custom ontology check: use_custom_ontology={cfg.use_custom_ontology}, vault_path={cfg.vault_path}")
             if cfg.use_custom_ontology and cfg.vault_path:
+                logger.debug("[DAEMON] Initializing custom ontology loader...")
                 from .models import initialize_global_loader
                 if not initialize_global_loader(cfg.vault_path):
                     logger.warning("[DAEMON] Failed to initialize custom ontology loader")
                 else:
+                    logger.debug("[DAEMON] Custom ontology loader initialized successfully")
                     
                     # Verify global loader initialization with lazy loading
                     from .models import get_entity_types
                     entity_types = get_entity_types()
+                    logger.debug(f"[DAEMON] Daemon initialized with entity types: {entity_types}")
             else:
+                logger.debug("[DAEMON] Skipping custom ontology initialization (disabled or no vault path)")
             
             graphiti = await sync.initialize_graphiti(cfg, cfg.debug)
             if not graphiti:
@@ -231,10 +242,12 @@ class SyncDaemon:
         """
         Convert incoming dict to BridgeConfig and execute the sync pipeline wholly in-process.
         """
+        # @purpose: Set performance timing from UI setting (environment variable set at startup, config dict as fallback) @depends: config_dict @results: Performance timing controlled by logPerformance setting
         global ENABLE_PERF_TIMING
 
         # DIAGNOSTIC: Log current timing state and config value
         config_log_perf = config_dict.get('logPerformance', False)
+        logger.debug(
             f"[DIAGNOSTIC] Performance timing state - Current: {ENABLE_PERF_TIMING}, Config: {config_log_perf}")
 
         # FIX: Always update ENABLE_PERF_TIMING from config to respect setting changes
@@ -244,10 +257,12 @@ class SyncDaemon:
         if env_timing:
             # Environment variable overrides config (daemon startup setting)
             ENABLE_PERF_TIMING = True
+            logger.debug(
                 f"[DIAGNOSTIC] Environment variable override - ENABLE_PERF_TIMING: {ENABLE_PERF_TIMING}")
         else:
             # Use config value - this allows runtime setting changes to work
             ENABLE_PERF_TIMING = config_log_perf
+            logger.debug(
                 f"[DIAGNOSTIC] Updated ENABLE_PERF_TIMING from config: {ENABLE_PERF_TIMING}")
 
         try:
@@ -270,6 +285,7 @@ class SyncDaemon:
                     pending = [task for task in asyncio.all_tasks(
                         existing_loop) if not task.done()]
                     if pending:
+                        logger.debug(
                             f"[DIAGNOSTIC] Canceling {len(pending)} lingering tasks from previous operations...")
                         for task in pending:
                             task.cancel()
@@ -290,6 +306,7 @@ class SyncDaemon:
                 # FIX: Wait for all pending tasks before closing loop
                 pending = asyncio.all_tasks(loop)
                 if pending:
+                    logger.debug(
                         f"[DIAGNOSTIC] Waiting for {len(pending)} pending tasks before loop cleanup...")
                     try:
                         # Cancel all pending tasks and wait for them to finish
@@ -309,6 +326,7 @@ class SyncDaemon:
                 try:
                     if not loop.is_closed():
                         loop.close()
+                        logger.debug("[DIAGNOSTIC] Event loop closed safely")
                 except Exception as close_error:
                     logger.warning(
                         f"[DIAGNOSTIC] Error closing event loop: {close_error}")
@@ -392,6 +410,7 @@ class SyncDaemon:
                         pending = [task for task in asyncio.all_tasks(
                             loop) if not task.done()]
                         if pending:
+                            logger.debug(
                                 f"[DIAGNOSTIC] Found {len(pending)} lingering tasks after command, canceling...")
                             for task in pending:
                                 task.cancel()

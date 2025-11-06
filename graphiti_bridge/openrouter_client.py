@@ -187,6 +187,7 @@ class OpenRouterClient(LLMClient):
                     'provider': provider_config
                 }
                 
+                # DEBUG: Log what parameters we're sending to OpenRouter
                 logger.error(f"[OPENROUTER-PARAMS] Model: {request_params['model']}")
                 logger.error(f"[OPENROUTER-PARAMS] Response format: json_schema with strict=True")
                 logger.error(f"[OPENROUTER-PARAMS] Provider config: require_parameters=True")
@@ -210,7 +211,9 @@ class OpenRouterClient(LLMClient):
             
             # Log aggregated response (first call, then every 5th)
             if _global_response_count == 1:
+                logger.debug(f"[{_global_response_count}] OpenRouter Response Served by: {provider}, with Model: {model}")
             elif _global_response_count % 5 == 0:
+                logger.debug(f"[{_global_response_count}] OpenRouter Responses Served by: {provider}, with Model: {model}")
             
             result = response.choices[0].message.content or ''
             

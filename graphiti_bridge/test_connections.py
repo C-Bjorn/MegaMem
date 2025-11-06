@@ -769,6 +769,7 @@ def main():
                     'latency': 0
                 })
         elif args.test_type == 'episode-test':
+            # @purpose: run a safe, small episode creation to verify end-to-end sync path
             # @depends: initialize_graphiti from sync.py to mirror production flow
             # @output: prints JSON with 'episode_uuid' on success
             try:
@@ -851,6 +852,7 @@ def main():
         import traceback
         tb = traceback.format_exc()
         logger.error(f"Connection test failed: {e}")
+        logger.debug(f"Full traceback: {tb}")
         print_json_response({
             'success': False,
             'message': f'Connection test failed: {str(e)}',

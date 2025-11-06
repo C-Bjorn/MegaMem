@@ -19,12 +19,18 @@ import psutil
 import aiohttp
 from datetime import datetime, timezone
 
+# @vessel-protocol:Tyr governs:[system-init|refactor] context:Force UTF-8 stdout for Windows compatibility
+# @inter-dependencies: [sys, codecs (builtin)]
+# @purpose: Resolve UnicodeEncodeError on Windows during JSON output to console
+# @result: Python console output will correctly display Unicode characters, resolving sync failures caused by character encoding issues.
+# @signed: C.Bjørn
 if sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         import codecs
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+# @vessel-close:Tyr
 
 # --- Path Setup ---
 try:
@@ -124,10 +130,12 @@ class ObsidianMegaMemMCPServer:
         self.vault_resolver = VaultResolver()
         self.ws_port = None  # Store port for error messages
         
+        # @purpose: Async initialization state tracking @depends: asyncio.Event @results: Fast MCP startup with background loading
         self.initialization_complete = False
         self.resource_loading_task = None
         self.ready_event = asyncio.Event()
         
+        # @purpose: Episode queuing to prevent race conditions @depends: asyncio.Queue @results: Sequential episode processing per group_id
         self.episode_queues: Dict[str, asyncio.Queue] = {}
         self.queue_workers: Dict[str, bool] = {}
 
@@ -641,6 +649,7 @@ WORKFLOW:
                 })
             )]
 
+        # @purpose: Wait for background resource loading to complete @depends: ready_event @results: Tools work only when fully initialized
         if not self.initialization_complete:
             try:
                 await asyncio.wait_for(self.ready_event.wait(), timeout=20.0)
@@ -958,6 +967,7 @@ WORKFLOW:
                     }))]
 
             elif name == "add_conversation_memory":
+                # @purpose: Store conversation using Graphiti message format @depends: conversation array @results: Formatted episode in graph
                 conversation = arguments.get("conversation")
                 if not conversation or not isinstance(conversation, list):
                     return [types.TextContent(type="text", text=json.dumps({
@@ -1195,6 +1205,7 @@ WORKFLOW:
                     obsidian_config, config_path)
                 self.bridge_config = bridge_config
                 
+                # @purpose: Start background resource loading task @depends: bridge_config @results: Non-blocking initialization
                 self.resource_loading_task = asyncio.create_task(
                     self._background_resource_loading(bridge_config)
                 )
@@ -1251,6 +1262,11 @@ WORKFLOW:
             self.ready_event.set()
             raise
 
+    # @vessel-protocol:Heimdall governs:discovery context:Server discovery with integrated auto-launch for seamless user experience
+    # @inter-dependencies: [RemoteRPCBridge, WebSocketServer, FileTools, aiohttp, obsidian auto-launch]
+    # @purpose: Combine health probing, server discovery, RPC client fallback, and Obsidian auto-launch in optimal order
+    # @result: MCP processes launch Obsidian if needed, then establish WebSocket connections without user intervention
+    # @signed: C.Bjørn
     async def _discover_or_start_websocket_server_with_autolaunch(self, ws_config: Dict, obsidian_config: Dict) -> bool:
         """Discover existing server via health check or start new server with integrated Obsidian auto-launch"""
         port = ws_config.get("port", 41484)  # Default port
@@ -1348,6 +1364,11 @@ WORKFLOW:
             logger.warning(
                 f"[WARNING] Could not verify Obsidian connection via RPC: {e}")
 
+    # @vessel-protocol:Heimdall governs:discovery context:Legacy server discovery method for fallback compatibility
+    # @inter-dependencies: [RemoteRPCBridge, WebSocketServer, FileTools, aiohttp]
+    # @purpose: Maintain original server discovery logic for backward compatibility
+    # @result: MCP processes can share a single WebSocket server or fall back to RPC communication without port conflicts
+    # @signed: C.Bjørn
     async def _discover_or_start_websocket_server(self, ws_config: Dict) -> bool:
         """Discover existing server via health check or start new server with RPC fallback"""
         port = ws_config.get("port", 41484)  # Default port
@@ -1487,7 +1508,13 @@ WORKFLOW:
         except Exception as e:
             logger.warning(f"[WARNING] Health check failed: {e}")
             return {"success": False, "status_code": 0, "error": str(e)}
+    # @vessel-close:Heimdall
 
+    # @vessel-protocol:Bifrost governs:integration context:Unified folder management handler routing operations to FileTools
+    # @inter-dependencies: [FileTools.create_obsidian_folder, FileTools.rename_obsidian_folder, FileTools.delete_obsidian_folder]
+    # @purpose: Route folder operations based on operation parameter to appropriate FileTools methods
+    # @result: Unified folder management through single MCP tool interface
+    # @signed: C.Bjørn
     async def _handle_manage_obsidian_folders(self, arguments: Dict[str, Any]) -> List[types.TextContent]:
         """Handle unified folder management operations with operation parameter routing."""
         try:
@@ -1536,6 +1563,7 @@ WORKFLOW:
                 "success": False,
                 "error": f"Failed to manage folder: {str(e)}"
             }))]
+    # @vessel-close:Bifrost
 
     async def _handle_manage_obsidian_notes(self, arguments: Dict[str, Any]) -> List[types.TextContent]:
         """Handle manage_obsidian_notes tool call"""
@@ -1701,6 +1729,11 @@ WORKFLOW:
             f"[DB-CONFIG] No database URL found in config, using fallback: {fallback_url}")
         return fallback_url
 
+    # @vessel-protocol:Baldr governs:launch context:Obsidian auto-launch and process detection for seamless user experience
+    # @inter-dependencies: [psutil, subprocess, obsidian config]
+    # @purpose: Ensure Obsidian is running before proceeding with MCP operations
+    # @result: Users can start MCP processes without manually launching Obsidian first
+    # @signed: C.Bjørn
     async def _ensure_obsidian_running(self, obsidian_config: Dict):
         """Ensure Obsidian is running with our vault"""
         # Always try to open the vault - harmless if already open
@@ -1724,6 +1757,7 @@ WORKFLOW:
             result = await self.file_tools.list_obsidian_vaults()
             return result.get("success", False) and len(result.get("vaults", [])) > 0
         except Exception as e:
+            logger.debug(f"[DEBUG] Plugin connection check failed: {e}")
             return False
 
     async def _wait_for_plugin_connection(self, timeout: float = 2.0) -> bool:
@@ -1754,6 +1788,7 @@ WORKFLOW:
             logger.warning(
                 f"[WARNING] Error waiting for plugin connection: {e}")
             return False
+    # @vessel-close:Baldr
 
 # --- Main Entry Point ---
 

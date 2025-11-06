@@ -54,6 +54,7 @@ class RemoteRPCBridge:
                 'timeoutMs': int(timeout * 1000)
             }
 
+            logger.debug(
                 f"[RPC-BRIDGE] Sending {operation} to vault {vault_id}")
 
             # Send HTTP POST to /rpc endpoint
@@ -87,6 +88,7 @@ class RemoteRPCBridge:
 
                 # Parse successful response
                 result = await response.json()
+                logger.debug(f"[RPC-BRIDGE] Received response for {operation}")
 
                 # Transform response to match WebSocketServer format
                 return {

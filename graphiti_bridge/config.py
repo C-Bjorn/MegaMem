@@ -220,6 +220,11 @@ class BridgeConfig:
         2. Database-specific configuration (Neo4j: uri, FalkorDB: host+port)
         3. Fallback to default URL
         """
+        # @vessel-protocol:Heimdall governs:validation context:Database URL configuration priority resolution
+        # @inter-dependencies: BridgeConfig.from_dict, database connection setup
+        # @purpose: Ensure proper database URL resolution from plugin settings with fallback handling
+        # @result: Sync process uses correct database URL from plugin configuration instead of hardcoded defaults
+        # @signed: C.Bjørn
 
         # Priority 1: Direct databaseUrl (highest priority)
         direct_url = config_dict.get(
@@ -249,6 +254,7 @@ class BridgeConfig:
         else:  # neo4j default
             return "bolt://localhost:7687"
 
+        # @vessel-close:Heimdall
 
     def validate(self) -> List[str]:
         """Validate configuration and return list of errors"""

@@ -23,6 +23,7 @@ except ImportError:
 # TEMP DEBUG: Force stderr output to see if anything works
 # Debug logging bridge functions
 
+# @purpose: Global debug flag and stderr logging functions to replace broken Python logging
 # @depends: sys.stderr, json for structured output
 # @results: Clean debug messages in consolidated.log, stdout preserved for JSON bridge
 

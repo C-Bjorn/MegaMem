@@ -8,6 +8,7 @@ import logging
 from typing import Dict, List, Any, Optional, Union, TYPE_CHECKING, cast
 from websocket_server import WebSocketServer
 
+# @vessel-protocol:Bifrost governs:integration context:Support for both local WebSocket server and remote RPC bridge adapters
 if TYPE_CHECKING:
     from remote_rpc_bridge import RemoteRPCBridge
 else:
@@ -175,6 +176,7 @@ class FileTools:
 
         response = await self.server.request_file_operation(resolved_vault_id, "file:read", params)
         
+        # @purpose: Generate line map metadata for precise editing @depends: include_line_map flag @results: lineMap and sections in metadata
         if include_line_map and response and response.get("success") and "payload" in response:
             content = response["payload"].get("content", "")
             lines = content.split('\n')
@@ -363,6 +365,7 @@ class FileTools:
                 logger.info(
                     f"Successfully updated note: {path} (mode: {editing_mode})")
                 
+                # @purpose: Return updated line map after range_based edits @depends: editing_mode == range_based @results: updatedLineMap for sequential edits
                 if editing_mode == "range_based":
                     # Read the file to get updated content
                     read_response = await self.read_obsidian_note(path, resolved_vault_id, include_line_map=False)
@@ -817,6 +820,11 @@ class FileTools:
             logger.error("Error in create_note_with_template", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    # @vessel-protocol:Tyr governs:feature context:Unified folder management operations for Obsidian vault organization
+    # @inter-dependencies: [WebSocketServer.request_file_operation, _validate_vault_connection]
+    # @purpose: Enable create, rename, and delete operations for vault folders through MCP interface
+    # @result: Complete folder management capabilities integrated with existing WebSocket architecture
+    # @signed: C.Bjørn
 
     async def create_obsidian_folder(self, folder_path: str, vault_id: Optional[str] = None) -> Dict[str, Any]:
         """Create a new folder in Obsidian vault."""
@@ -896,3 +904,4 @@ class FileTools:
         logger.info(f"[NOTE] Renaming note: {old_path} -> {new_path}")
         response = await self.server.request_file_operation(resolved_vault_id, "file:rename", params)
         return response or {"error": "No response from vault"}
+    # @vessel-close:Tyr

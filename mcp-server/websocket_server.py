@@ -134,6 +134,7 @@ class WebSocketServer:
             # Set timeout (default 20s, max from request)
             timeout = min(timeout_ms / 1000.0 if timeout_ms else 20.0, 30.0)
 
+            logger.debug(
                 f"[RPC] Executing {operation} on vault {vault_id} with timeout {timeout}s")
 
             # Route to existing WebSocket request handler
@@ -211,9 +212,11 @@ class WebSocketServer:
             async for msg in ws:
                 try:
                     if msg.type == aiohttp.WSMsgType.TEXT:
+                        logger.debug(
                             f"[WS] Received message from client {client_id}")
                         try:
                             data = json.loads(msg.data)
+                            logger.debug(
                                 f"[WS] Processing message type: {data.get('type', 'unknown')}")
                             await self.handle_message(client_id, data)
                         except json.JSONDecodeError as e:
@@ -239,6 +242,7 @@ class WebSocketServer:
                         logger.info(
                             f"[WS] WebSocket close message from client {client_id}")
                     else:
+                        logger.debug(
                             f"[WS] Unknown message type from client {client_id}: {msg.type}")
                 except Exception as loop_error:
                     logger.error(
@@ -283,6 +287,7 @@ class WebSocketServer:
                 future = self.pending_requests.pop(request_id, None)
                 if future and not future.done():
                     future.cancel()
+                    logger.debug(
                         f"[INFO] Cancelled pending request {request_id} for disconnected client")
 
             logger.info(f"[INFO] Client disconnected: {client_id}")
@@ -292,6 +297,7 @@ class WebSocketServer:
     async def handle_message(self, client_id: str, message: Dict[str, Any]):
         """Handle incoming messages from Obsidian plugins."""
         msg_type = message.get('type')
+        logger.debug(
             f"[WS] Processing message type '{msg_type}' from client {client_id}")
 
         if msg_type == 'register':
@@ -341,6 +347,7 @@ class WebSocketServer:
                         'timestamp': message.get('timestamp')
                     }
                     future.set_result(response_data)
+                    logger.debug(
                         f"[INFO] Resolved pending request {request_id}")
             else:
                 logger.warning(
@@ -404,10 +411,12 @@ class WebSocketServer:
         try:
             # Send request to client
             await self.send_to_client(client_id, request)
+            logger.debug(
                 f"[INFO] Sent file operation request {request_id} to vault {vault_id}")
 
             # Wait for response with timeout
             response = await asyncio.wait_for(future, timeout=timeout)
+            logger.debug(f"[INFO] Received response for request {request_id}")
             return response
 
         except asyncio.TimeoutError:
@@ -523,6 +532,7 @@ def resolve_vault_id(vault_id: Optional[str] = None) -> str:
         Resolved vault ID, with intelligent fallback to active vault or "default"
     """
     if vault_id:
+        logger.debug(f"Using explicit vault ID: {vault_id}")
         return vault_id
 
     # Try to get active vault from WebSocket server
@@ -531,9 +541,11 @@ def resolve_vault_id(vault_id: Optional[str] = None) -> str:
         if server:
             active_vault = server.get_active_vault()
             if active_vault:
+                logger.debug(f"Using active vault from server: {active_vault}")
                 return active_vault
     except Exception as e:
         logger.warning(f"Failed to get active vault from server: {e}")
 
     # Fallback to default
+    logger.debug("Using fallback vault ID: default")
     return "default"

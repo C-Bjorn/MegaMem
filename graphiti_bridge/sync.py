@@ -245,6 +245,7 @@ async def main():
                     # Otherwise assume provided path is vault root or derive accordingly
                     init_vault_path = str(pdp)
                 if config.debug:
+                    logger.debug(
                         f"Using explicit plugin_data_path for loader: {plugin_data_path} -> vault {init_vault_path}")
 
             # DEFINITIVE FIX: Explicitly initialize the loader and load models.
@@ -264,6 +265,7 @@ async def main():
                     "Custom ontology models loaded successfully via DynamicModelLoader.")
         else:
             if config.debug:
+                logger.debug(
                     "Custom ontology disabled - skipping model loader")
                 logger.info(
                     "Custom ontology disabled - skipping model loader initialization")
@@ -271,6 +273,7 @@ async def main():
         # Initialize Graphiti with timing
         graphiti_init_start = time.time()
         if debug_mode:
+            logger.debug("Initializing Graphiti...")
 
         graphiti = await initialize_graphiti(config, config.debug)
         if not graphiti:
@@ -278,6 +281,7 @@ async def main():
 
         if debug_mode:
             graphiti_init_time = time.time() - graphiti_init_start
+            logger.debug(
                 f"Graphiti initialization completed in {graphiti_init_time:.2f}s")
 
         # Validate that we have exactly one note
@@ -288,15 +292,18 @@ async def main():
         # Process note with timing
         note_processing_start = time.time()
         if debug_mode:
+            logger.debug(f"Processing note: {config.notes[0]}")
 
         result = await process_note(config.notes[0], graphiti, logger, config)
 
         if debug_mode:
             note_processing_time = time.time() - note_processing_start
+            logger.debug(
                 f"Note processing completed in {note_processing_time:.2f}s")
 
         # Ensure database connection is properly closed
         if config.debug:
+            logger.debug("Closing Graphiti connection...")
         try:
             if hasattr(graphiti, 'close'):
                 await graphiti.close()
@@ -340,6 +347,7 @@ async def main():
 
             # Add debug logging for final response (but don't log the full JSON to avoid contamination)
             if debug_mode:
+                logger.debug(
                     "Sync completed successfully, sending final result to TypeScript")
 
             # Print the JSON response to stdout with explicit newline
@@ -367,6 +375,7 @@ async def main():
                 pass
             sys.stderr = original_stderr
         if logger:
+            logger.debug("Keyboard interrupt")
         # Return structured JSON for keyboard interrupt
         error_response = {
             "success": False,
@@ -382,6 +391,7 @@ async def main():
             pass
         # Ensure logger info if debug
         if logger and debug_mode:
+            logger.debug("Printing keyboard interrupt JSON response")
         print(json.dumps(error_response, ensure_ascii=False,
                          separators=(',', ':')), flush=True)
         sys.exit(1)
@@ -400,6 +410,7 @@ async def main():
         # Log full exception if debug enabled
         if logger and debug_mode:
             logger.error(f"Unexpected error in sync process: {short_exc}")
+            logger.debug(tb)
         # Build structured JSON response containing traceback so TS side can show full details
         error_response = {
             "success": False,
@@ -538,8 +549,10 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
     if debug:
         try:
             # Log configured embedding dimension if available on config object
+            logger.debug(
                 f"Embedder: {config.embedder_provider} model={config.embedding_model}")
         except Exception:
+            logger.debug(
                 "[EMBEDDER-DEBUG] Could not read embedder_config for diagnostic logging")
 
         # If the embedder exposes an async embed method, attempt a single sample to get returned vector length.
@@ -555,6 +568,7 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
                 # sync embed
                 vecs = embedder.embed(["diagnostic test"])
                 if isinstance(vecs, list) and len(vecs) > 0 and isinstance(vecs[0], (list, tuple)):
+                    logger.debug(
                         f"[EMBEDDER-DEBUG] Sample embedding length (sync): {len(vecs[0])}")
             if sample_call is not None:
                 # Run the coroutine to completion (safe in initialization context)
@@ -573,10 +587,13 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
                     # Safe to run with asyncio.run
                     vecs = asyncio.run(sample_call)
                 if isinstance(vecs, list) and len(vecs) > 0 and isinstance(vecs[0], (list, tuple)):
+                    logger.debug(
                         f"[EMBEDDER-DEBUG] Sample embedding length (async): {len(vecs[0])}")
                 else:
+                    logger.debug(
                         f"[EMBEDDER-DEBUG] Sample embedding returned type: {type(vecs)}")
         except Exception as e:
+            logger.debug(
                 f"[EMBEDDER-DEBUG] Sample embedding diagnostic failed: {e}")
     # ---- End diagnostics ----
 
@@ -624,6 +641,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
     logger = logging.getLogger('graphiti_bridge.sync')
 
     if debug:
+        logger.debug("[CROSS-ENCODER-DEBUG] create_cross_encoder() called")
 
     cross_encoder_provider = 'none'  # Default value to prevent unbound variable
     try:
@@ -635,11 +653,13 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
 
         if debug:
             model_text = f" model={cross_encoder_model}" if cross_encoder_model else " (no model)"
+            logger.debug(
                 f"Cross-encoder: {cross_encoder_provider}{model_text}")
 
         # Handle 'none' option to disable cross-encoder entirely (PRIVACY FIX: return disabled object instead of None)
         if cross_encoder_provider == 'none' or cross_encoder_provider is None:
             if debug:
+                logger.debug(
                     "[CROSS-ENCODER-DEBUG] Cross-encoder disabled (provider set to 'none' or not configured) - using disabled cross-encoder for privacy")
             return create_disabled_cross_encoder()
 
@@ -658,6 +678,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
         # Create cross-encoder client based on provider
         if cross_encoder_provider == 'openai':
             if debug:
+                logger.debug(
                     "[CROSS-ENCODER-DEBUG] Creating OpenAI cross-encoder")
             # OpenAI Cross-Encoder/Reranker
             if not OPENAI_CROSS_ENCODER_AVAILABLE:
@@ -677,6 +698,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
                 )
             )
             if debug:
+                logger.debug(
                     f"OpenAI cross-encoder created with model: {primary_model}")
 
         elif cross_encoder_provider == 'bge':
@@ -687,12 +709,14 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
                 if not SKIP_BGE_IMPORT:
                     try:
                         if debug:
+                            logger.debug(
                                 "[CROSS-ENCODER-DEBUG] Lazy-loading BGE cross-encoder (first use)...")
                         _t = time.time()
                         from graphiti_core.cross_encoder.bge_reranker_client import BGERerankerClient as BGEClient
                         BGERerankerClient = BGEClient
                         BGE_CROSS_ENCODER_AVAILABLE = True
                         if debug:
+                            logger.debug(
                                 f"[CROSS-ENCODER-DEBUG] BGE loaded in {time.time() - _t:.2f}s")
                     except ImportError:
                         BGE_CROSS_ENCODER_AVAILABLE = False
@@ -702,9 +726,11 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
                 else:
                     BGE_CROSS_ENCODER_AVAILABLE = False
                     if debug:
+                        logger.debug(
                             "[CROSS-ENCODER-DEBUG] BGE import skipped due to SKIP_BGE_IMPORT=true")
 
             if debug:
+                logger.debug(
                     f"[CROSS-ENCODER-DEBUG] BGE cross-encoder requested. Available: {BGE_CROSS_ENCODER_AVAILABLE}, Client: {BGERerankerClient is not None}")
 
             # BGE Cross-Encoder (Local via sentence-transformers)
@@ -731,6 +757,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
 
                     init_start = time.time()
                     if debug:
+                        logger.debug(
                             "[BGE-TIMING] Starting BGE initialization...")
 
                     _BGE_CROSS_ENCODER_INSTANCE = BGERerankerClient()
@@ -746,6 +773,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
 
         elif cross_encoder_provider == 'gemini' or cross_encoder_provider == 'google' or cross_encoder_provider == 'google-ai':
             if debug:
+                logger.debug(
                     "[CROSS-ENCODER-DEBUG] Creating Gemini cross-encoder")
             # Gemini Cross-Encoder/Reranker
             if not GEMINI_CROSS_ENCODER_AVAILABLE or GeminiRerankerClient is None:
@@ -763,6 +791,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
                 )
             )
             if debug:
+                logger.debug(
                     f"Gemini cross-encoder created with model: {model_name}")
 
         else:
@@ -773,6 +802,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
             return create_disabled_cross_encoder()
 
         if debug:
+            logger.debug(
                 f"[CROSS-ENCODER-DEBUG] Successfully created cross-encoder: {type(cross_encoder).__name__}")
         return cross_encoder
 
@@ -780,6 +810,7 @@ def create_cross_encoder(config: BridgeConfig, debug: bool = False):
         if debug:
             logger.warning(
                 f"[CROSS-ENCODER-DEBUG] Failed to create cross-encoder ({cross_encoder_provider}): {e}")
+            logger.debug(
                 "[CROSS-ENCODER-DEBUG] Cross-encoder creation failed, using disabled cross-encoder to prevent unauthorized fallbacks")
         return create_disabled_cross_encoder()
 
@@ -854,12 +885,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 client_params['reasoning'] = reasoning_effort
                 client_params['verbosity'] = verbosity_level
                 if debug:
+                    logger.debug(
                         f"Using reasoning model {config.llm_model} with reasoning: {reasoning_effort}, verbosity: {verbosity_level}")
             else:
                 # Explicitly set reasoning and verbosity to None for non-o1 models
                 client_params['reasoning'] = None
                 client_params['verbosity'] = None
                 if debug:
+                    logger.debug(
                         f"Using standard GPT model {config.llm_model} - excluding reasoning/verbosity parameters")
 
             llm_client = OpenAIClient(**client_params)
@@ -887,11 +920,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             # Create cross-encoder using unified helper function
             if debug:
+                logger.debug(
                     "[INIT-DEBUG] About to call create_cross_encoder() for Google AI provider")
             cross_encoder = create_cross_encoder(config, debug)
             if debug and cross_encoder:
+                logger.debug(
                     "[INIT-DEBUG] Google AI cross-encoder successfully created")
             elif debug and cross_encoder is None:
+                logger.debug(
                     "[INIT-DEBUG] Google AI cross-encoder disabled or unavailable")
 
         elif config.llm_provider == "anthropic" or config.llm_provider == "claude":
@@ -914,11 +950,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             # Create cross-encoder using unified helper function
             if debug:
+                logger.debug(
                     "[INIT-DEBUG] About to call create_cross_encoder() for Anthropic provider")
             cross_encoder = create_cross_encoder(config, debug)
             if debug and cross_encoder:
+                logger.debug(
                     "[INIT-DEBUG] Anthropic cross-encoder successfully created")
             elif debug and cross_encoder is None:
+                logger.debug(
                     "[INIT-DEBUG] Anthropic cross-encoder disabled or unavailable")
 
         elif config.llm_provider == "ollama":
@@ -934,6 +973,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
             # For Ollama, ignore llm_small_model to improve structured JSON reliability
             ollama_small = None
             if debug and getattr(config, 'llm_small_model', None):
+                logger.debug(
                     "Ollama provider: ignoring llm_small_model for structured JSON reliability")
             llm_config = LLMConfig(
                 api_key="ollama",
@@ -948,11 +988,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             # Create cross-encoder using unified helper function
             if debug:
+                logger.debug(
                     "[INIT-DEBUG] About to call create_cross_encoder() for Ollama provider")
             cross_encoder = create_cross_encoder(config, debug)
             if debug and cross_encoder:
+                logger.debug(
                     "[INIT-DEBUG] Ollama cross-encoder successfully created")
             elif debug and cross_encoder is None:
+                logger.debug(
                     "[INIT-DEBUG] Ollama cross-encoder disabled or unavailable")
 
         elif config.llm_provider == "venice":
@@ -975,11 +1018,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             # Create cross-encoder using unified helper function
             if debug:
+                logger.debug(
                     "[INIT-DEBUG] About to call create_cross_encoder() for Venice provider")
             cross_encoder = create_cross_encoder(config, debug)
             if debug and cross_encoder:
+                logger.debug(
                     "[INIT-DEBUG] Venice cross-encoder successfully created")
             elif debug and cross_encoder is None:
+                logger.debug(
                     "[INIT-DEBUG] Venice cross-encoder disabled or unavailable")
 
         elif config.llm_provider == "openrouter":
@@ -988,6 +1034,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"Initializing OpenRouter provider - LLM: {config.llm_model}, Embedder: {config.embedder_provider} {config.embedding_model}")
             
+            # @purpose: Handle OpenRouter preset appending for custom model combinations @depends: preset settings @results: Model name with optional preset suffix
             processed_model = config.llm_model
             processed_small_model = getattr(config, 'llm_small_model', None)
             
@@ -997,6 +1044,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
             
             if debug:
                 logger.info(f"OpenRouter preset config: slug='{preset_slug}', use_with_custom={use_preset_with_custom}")
+                logger.debug(f"OpenRouter small model config: llm_small_model='{processed_small_model}'")
             
             if preset_slug and use_preset_with_custom:
                 preset_suffix = f"@preset/{preset_slug}"
@@ -1031,11 +1079,14 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             # Create cross-encoder using unified helper function
             if debug:
+                logger.debug(
                     "[INIT-DEBUG] About to call create_cross_encoder() for OpenRouter provider")
             cross_encoder = create_cross_encoder(config, debug)
             if debug and cross_encoder:
+                logger.debug(
                     "[INIT-DEBUG] OpenRouter cross-encoder successfully created")
             elif debug and cross_encoder is None:
+                logger.debug(
                     "[INIT-DEBUG] OpenRouter cross-encoder disabled or unavailable")
 
         else:
@@ -1153,6 +1204,7 @@ def extract_episode_uuid_from_result(graphiti_result, debug_mode: bool, logger) 
                     if value:
                         episode_uuid = str(value)
                         if debug_mode:
+                            logger.debug(
                                 f"Found episode UUID in episode.{key}: {episode_uuid}")
                         break
     elif hasattr(graphiti_result, 'episode_uuid'):
@@ -1167,6 +1219,7 @@ def extract_episode_uuid_from_result(graphiti_result, debug_mode: bool, logger) 
         if debug_mode:
             available_attrs = [attr for attr in dir(
                 graphiti_result) if not attr.startswith('_')]
+            logger.debug(
                 f"No UUID found in result. Available attributes: {available_attrs}")
 
         # Look for UUID in nested objects
@@ -1174,6 +1227,7 @@ def extract_episode_uuid_from_result(graphiti_result, debug_mode: bool, logger) 
             for key, value in graphiti_result.__dict__.items():
                 if 'uuid' in key.lower() or 'id' in key.lower():
                     if debug_mode:
+                        logger.debug(
                             f"Found potential UUID field: {key} = {value}")
                     if not episode_uuid and value:
                         episode_uuid = str(value)
@@ -1190,6 +1244,7 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
     debug_mode = getattr(config, 'debug', False)  # Use config debug setting
 
     if debug_mode:
+        logger.debug(f"Processing note: {note_path}")
 
     # Smart path resolution: only prepend vault_path if the note_path doesn't already include it
     full_note_path = note_path
@@ -1224,6 +1279,7 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         # Check if note should be processed (skip private notes)
         if metadata.get('private', False):
             if debug_mode:
+                logger.debug(f"Skipping private note: {note_name}")
             return None
 
         # Get database type for compatibility handling
@@ -1238,6 +1294,7 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         if group_id_override:
             group_id = str(group_id_override)
             if debug_mode:
+                logger.debug(
                     f"Using group_id override from config: {group_id}")
         else:
             group_id = resolve_namespace(note_path, metadata, config, logger)
@@ -1519,6 +1576,7 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
             frontmatter_block = "\n".join(frontmatter_lines)
             merged_body = f"{frontmatter_block}\n{clean_text}"
             if debug_mode:
+                logger.debug(
                     f"Frontmatter: {len(metadata)} fields attached to body")
         episode_kwargs = {
             'name': note_name,
@@ -1536,6 +1594,7 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         if prev_uuids:
             episode_kwargs['previous_episode_uuids'] = prev_uuids
             if debug_mode:
+                logger.debug(
                     f"Received previous_episode_uuids from config: {prev_uuids}")
 
         # Create episode with database-specific parameters
@@ -1608,6 +1667,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
             frontmatter_block = "\n".join(frontmatter_lines)
             merged_body = f"{frontmatter_block}\n{clean_text}"
             if debug_mode:
+                logger.debug(
                     f"Frontmatter: {len(metadata)} fields attached to body")
         episode_kwargs = {
             'name': note_name,
@@ -1629,6 +1689,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
         if prev_uuids:
             episode_kwargs['previous_episode_uuids'] = prev_uuids
             if debug_mode:
+                logger.debug(
                     f"Received previous_episode_uuids from config: {prev_uuids}")
 
         # Create custom entity episode using Graphiti Custom Entities API
@@ -1661,11 +1722,13 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
             namespace = str(metadata['g_group_id']).strip()
             if namespace:
                 if debug_mode:
+                    logger.debug(f"Using property namespace: {namespace}")
                 return namespace
 
         # 2. Folder namespacing (second priority)
         if config.enable_folder_namespacing:
             if debug_mode:
+                logger.debug(
                     f"Folder namespacing enabled, checking for custom mappings")
             if hasattr(config, 'folder_namespace_mappings') and config.folder_namespace_mappings:
                 # Normalize to vault-relative path for matching (align with TS logic)
@@ -1681,15 +1744,18 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
                 except Exception:
                     note_path_for_mapping = str(note_path).replace('\\', '/')
                 if debug_mode:
+                    logger.debug(
                         f"Found {len(config.folder_namespace_mappings)} custom folder mappings; matching with '{note_path_for_mapping}'")
                 custom_group_id = _resolve_custom_folder_mapping(
                     note_path_for_mapping, config.folder_namespace_mappings, debug_mode, logger)
                 if custom_group_id:
                     if debug_mode:
+                        logger.debug(
                             f"Using custom folder mapping: {custom_group_id}")
                     return custom_group_id
             else:
                 if debug_mode:
+                    logger.debug(
                         f"No custom folder mappings available: hasattr={hasattr(config, 'folder_namespace_mappings')}, mappings={getattr(config, 'folder_namespace_mappings', None)}")
 
         # 3. Namespace strategy (lowest priority)
@@ -1698,23 +1764,27 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
             vault_name = _extract_vault_name_from_path(
                 note_path, config.default_namespace, debug_mode, logger)
             if debug_mode:
+                logger.debug(f"Using vault namespace: {vault_name}")
             return vault_name
 
         elif config.namespace_strategy == 'custom':
             # Use custom default namespace
             if debug_mode:
+                logger.debug(
                     f"Using custom namespace: {config.default_namespace}")
             return config.default_namespace
 
         else:
             # Fallback to default namespace for any other strategy
             if debug_mode:
+                logger.debug(
                     f"Using default namespace: {config.default_namespace}")
             return config.default_namespace
 
     except Exception as e:
         if debug_mode:
             logger.warning(f"Error resolving namespace for {note_path}: {e}")
+            logger.debug(
                 f"Falling back to default namespace: {config.default_namespace}")
         return config.default_namespace
 
@@ -1760,6 +1830,7 @@ def _resolve_custom_folder_mapping(note_path: str, folder_mappings: list, debug_
         )
 
         if debug_mode:
+            logger.debug(
                 f"Checking {len(sorted_mappings)} folder mappings for path: {note_path_normalized}")
 
         for mapping in sorted_mappings:
@@ -1780,10 +1851,12 @@ def _resolve_custom_folder_mapping(note_path: str, folder_mappings: list, debug_
             # Check if note's folder path matches the mapped folder path exactly or is a subfolder
             if note_folder_path == folder_path_normalized or note_folder_path.startswith(folder_path_normalized + '/'):
                 if debug_mode:
+                    logger.debug(
                         f"Found matching folder mapping: '{folder_path_normalized}' -> '{group_id}'")
                 return group_id
 
         if debug_mode:
+            logger.debug(
                 f"No custom folder mapping found for path: {note_path_normalized}")
         return None
 
