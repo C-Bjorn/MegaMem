@@ -310,7 +310,7 @@ Advanced configuration options for debugging and performance. Many of the settin
 
 ### Debug Logging <i data-lucide="check-circle"></i>
 - Description: Enable detailed logging for troubleshooting
-- Developer Note: Comprehensive debug logging system with immediate state updates.
+- Developer Note: Comprehensive debug logging system with immediate state updates. Debug logging is less verbose by default to reduce log file size.
 
 ### Log Management
 #### Actions:

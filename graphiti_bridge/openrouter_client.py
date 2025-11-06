@@ -186,6 +186,14 @@ class OpenRouterClient(LLMClient):
                 request_params['extra_body'] = {
                     'provider': provider_config
                 }
+                
+                logger.error(f"[OPENROUTER-PARAMS] Model: {request_params['model']}")
+                logger.error(f"[OPENROUTER-PARAMS] Response format: json_schema with strict=True")
+                logger.error(f"[OPENROUTER-PARAMS] Provider config: require_parameters=True")
+                if self.preferred_providers:
+                    logger.error(f"[OPENROUTER-PARAMS] Preferred providers: {self.preferred_providers}")
+                if self.excluded_providers:
+                    logger.error(f"[OPENROUTER-PARAMS] Excluded providers: {self.excluded_providers}")
             else:
                 # Simple JSON object for basic cases
                 request_params['response_format'] = {'type': 'json_object'}

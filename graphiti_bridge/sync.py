@@ -196,7 +196,6 @@ async def main():
 
         # Network debugging and initialization
         if debug_mode:
-                "Graphiti telemetry disabled via GRAPHITI_TELEMETRY_ENABLED=false")
             logger.info("Starting Graphiti Bridge sync process")
 
             # Import timing removed - not useful in production
@@ -240,8 +239,8 @@ async def main():
                     init_vault_path = str(pdp.parent.parent.parent.parent)
                 elif 'plugins' in str(pdp):
                     # If path contains 'plugins', assume it's a plugin directory: vault/.obsidian/plugins/<plugin-id>
-                    # Need to go up 4 levels to reach vault root
-                    init_vault_path = str(pdp.parent.parent.parent.parent)
+                    # Need to go up 3 levels to reach vault root (directory not file)
+                    init_vault_path = str(pdp.parent.parent.parent)
                 else:
                     # Otherwise assume provided path is vault root or derive accordingly
                     init_vault_path = str(pdp)

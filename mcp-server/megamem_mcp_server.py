@@ -930,17 +930,25 @@ WORKFLOW:
                     with open(config_path, 'r') as f:
                         obsidian_config = json.load(f)
 
-                    available_namespaces = obsidian_config.get(
-                        'availableNamespaces', [])
+                    # Get available namespaces
+                    available_namespaces = obsidian_config.get('availableNamespaces', [])
 
+                    # Get group_ids from folder namespace mappings
+                    folder_mappings = obsidian_config.get('folderNamespaceMappings', [])
+                    folder_group_ids = [mapping.get('groupId') for mapping in folder_mappings if mapping.get('groupId')]
+
+                    # Combine both lists and remove duplicates
+                    all_group_ids = list(set(available_namespaces + folder_group_ids))
+
+                    # Ensure default namespace is included
                     default_ns = self.bridge_config.default_namespace
-                    if default_ns not in available_namespaces:
-                        available_namespaces.append(default_ns)
+                    if default_ns not in all_group_ids:
+                        all_group_ids.append(default_ns)
 
                     return [types.TextContent(type="text", text=json.dumps({
                         "success": True,
-                        "group_ids": available_namespaces,
-                        "count": len(available_namespaces),
+                        "group_ids": sorted(all_group_ids),
+                        "count": len(all_group_ids),
                         "current_default": default_ns
                     }))]
                 except Exception as e:

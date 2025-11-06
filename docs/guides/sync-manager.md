@@ -20,10 +20,11 @@ The MegaMem Sync Manager provides a centralized interface for controlling and ob
 
 ## Accessing the Sync Manager
 
-The Sync Manager can be accessed in two primary ways:
+The Sync Manager can be accessed in three ways:
 
-1.  **Command Palette**: Open the Command Palette (Ctrl/Cmd + P) and search for "Open Sync UI".
-2. **Settings Tab**: Navigate to the MegaMem plugin settings, and under "Sync Configuration", click the "Open Sync UI" button.
+1.  **Ribbon Icon**: Click the `refresh-cw` icon in the Obsidian ribbon (left sidebar).
+2.  **Command Palette**: Open the Command Palette (Ctrl/Cmd + P) and search for "Open Sync UI".
+3. **Settings Tab**: Navigate to the MegaMem plugin settings, and under "Sync Configuration", click the "Open Sync UI" button.
 
 ## Overview
 
@@ -60,10 +61,34 @@ This table breaks down your syncable notes by type, offering specific actions fo
 
 ## 2. Advanced
 
-The "Advanced" tab is currently under development. It is intended to provide more granular control over note selection, filtering, and customization for synchronization tasks.
+The "Advanced" tab provides granular control over note selection, filtering, and customization for synchronization tasks.
 
-<i data-lucide="alert-triangle"></i> Advanced Sync Under Development
-The "Advanced" sync features are not yet fully implemented. This tab currently serves as a placeholder for forthcoming comprehensive controls for note selection and customized sync operations.
+### Filter Controls
+
+The Advanced tab offers several filtering options to refine your note selection:
+
+-   **Source Filters**: Filter by entity type to sync specific categories of notes.
+-   **Status Filters**: Select notes based on their sync status (new, updated, synced, or private).
+-   **Path Filters**: Filter notes by folder location within your vault.
+
+### Selection Helpers
+
+Quick selection tools to streamline your workflow:
+
+-   **Select All**: Select all notes matching current filters.
+-   **Deselect All**: Clear all selections.
+-   **Invert Selection**: Flip the current selection state.
+
+### Results Table
+
+The results table displays all notes matching your filter criteria:
+
+-   **Checkbox**: Select/deselect individual notes for sync.
+-   **Status Icon**: Visual indicator of the note's sync status.
+-   **Note Title**: The name of the note.
+-   **Type**: The entity type classification.
+-   **Path**: Location within your vault.
+-   **Modified**: Last modification timestamp.
 
 ## Sync Notifications
 

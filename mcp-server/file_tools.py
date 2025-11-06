@@ -362,6 +362,56 @@ class FileTools:
             if response and response.get("success"):
                 logger.info(
                     f"Successfully updated note: {path} (mode: {editing_mode})")
+                
+                if editing_mode == "range_based":
+                    # Read the file to get updated content
+                    read_response = await self.read_obsidian_note(path, resolved_vault_id, include_line_map=False)
+                    if read_response and read_response.get("success") and "payload" in read_response:
+                        new_content = read_response["payload"].get("content", "")
+                        new_lines = new_content.split('\n')
+                        
+                        # Generate updated line map
+                        updated_line_map = {str(i+1): line for i, line in enumerate(new_lines)}
+                        
+                        # Detect sections for metadata
+                        sections = []
+                        in_frontmatter = False
+                        frontmatter_start = -1
+                        
+                        for i, line in enumerate(new_lines, 1):
+                            if line.strip() == "---":
+                                if not in_frontmatter and i == 1:
+                                    in_frontmatter = True
+                                    frontmatter_start = i
+                                elif in_frontmatter:
+                                    sections.append({
+                                        "name": "frontmatter",
+                                        "startLine": frontmatter_start,
+                                        "endLine": i
+                                    })
+                                    in_frontmatter = False
+                                    break
+                        
+                        if sections and sections[-1]["endLine"] < len(new_lines):
+                            sections.append({
+                                "name": "body",
+                                "startLine": sections[-1]["endLine"] + 1,
+                                "endLine": len(new_lines)
+                            })
+                        elif not sections and new_lines:
+                            sections.append({
+                                "name": "body",
+                                "startLine": 1,
+                                "endLine": len(new_lines)
+                            })
+                        
+                        # Add updated line map to response
+                        response["updatedLineMap"] = updated_line_map
+                        response["totalLines"] = len(new_lines)
+                        response["metadata"] = {
+                            "sections": sections
+                        }
+                
                 return response
             else:
                 logger.error(

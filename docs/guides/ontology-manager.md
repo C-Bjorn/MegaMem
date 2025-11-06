@@ -42,16 +42,15 @@ This tab allows you to manage the primary building blocks of your knowledge grap
 
 ### LLM Automatic Ontologies
 
-This section provides tools (currently under development) for leveraging Language Models to automatically generate and suggest entity descriptions based on your vault content.
+This section provides tools for leveraging Language Models to automatically generate and suggest entity descriptions based on your vault content.
 
--   **Generate Entity Descriptions**: (Coming Soon) Use AI to draft descriptions for your entity types.
--   **Suggest Property Descriptions**: (Coming Soon) Enables AI to suggest property definitions.
--   **Generate Complete Ontology**: (Coming Soon) Automatically generates a comprehensive schema.
+-   **Generate Entity Descriptions**: Use AI to draft descriptions for your entity types with three filter modes:
+    -   **Regenerate All**: Regenerate descriptions for all entity types, overwriting existing descriptions.
+    -   **Skip User Defined**: Only generate descriptions for entities without user-defined descriptions.
+    -   **New Only**: Generate descriptions only for newly discovered entity types.
+-   **Suggest Property Descriptions**: Enables AI to suggest property definitions using the same filter modes.
+-   **Generate Complete Ontology**: Automatically generates a comprehensive schema including entities, properties, edge types, and mappings.
 -   **Load All Default Entity Descriptions**: Populates descriptions for all discovered entity types using predefined defaults, if available.
-
-<i data-lucide="alert-triangle"></i> LLM Integration Coming Soon
-The LLM integration features within the Ontology Manager are currently under active development. While buttons are present, their full functionality with AI suggestions is not yet available.
-:::
 
 #### Graphiti Compliance Dashboard
 
@@ -75,7 +74,7 @@ Displays a list of all entity types discovered in your vault (e.g., based on `ty
 
 -   **Toggle Entity Enabled/Disabled**: Activates or deactivates an entity type for Pydantic model generation. Enabled entities will be included in your generated knowledge graph schema.
 -   **Edit Description**: Allows you to manually edit the description for an entity type. You can also "Load Default" if a predefined description exists.
--   **LLM Suggest**: (Coming Soon) Provides AI-generated description suggestions.
+-   **LLM Suggest**: Provides AI-generated description suggestions. A confirmation modal allows you to review and accept/reject the suggested description before applying.
 -   **Details**: Shows the number of files associated with the entity type, the count of its properties, and its individual compliance score.
 
 ## 2. Properties
@@ -84,10 +83,13 @@ This tab lists all properties associated with your entity types, allowing for de
 
 ### LLM Automatic Property Descriptions
 
-Similar to Entity Types, this section (under development) will provide AI-driven assistance for property management.
+This section provides AI-driven assistance for property management.
 
--   **Generate All Property Descriptions**: (Coming Soon) Auto-generate descriptions for all entity properties.
--   **Suggest Property Types**: (Coming Soon) AI-assisted suggestions for property field types.
+-   **Generate All Property Descriptions**: Auto-generate descriptions for all entity properties with filter modes:
+    -   **Regenerate All**: Regenerate descriptions for all properties, overwriting existing ones.
+    -   **Skip User Defined**: Only generate descriptions for properties without user-defined descriptions.
+    -   **New Only**: Generate descriptions only for newly discovered properties.
+-   **Suggest Property Types**: AI-assisted suggestions for property field types.
 -   **Load Default Descriptions**: Applies predefined descriptions to properties.
 -   **Enable Default Properties**: Activates all properties that have default descriptions, excluding protected or globally ignored fields.
 
@@ -104,7 +106,7 @@ An expandable list of all discovered entity types, each showing its properties.
     -   **Property Mapping Indicator**: Shows if a property name has been mapped (e.g., from `MyProperty` to `my_property`).
     -   **Property Defined**: Toggles whether the property's description is stored in `data.json`.
     -   **Status Indicator**: Shows if a property is `PROTECTED` (system-reserved), `IGNORED` (globally), has `NAMING` issues, is `ENABLED`, or `DISABLED`.
-    -   **Description Input**: Edit the property's description. Can "Load Default" or use "LLM Suggest" (coming soon).
+    -   **Description Input**: Edit the property's description. Can "Load Default" or use "LLM Suggest" with confirmation modal.
     -   **Validation Warnings**: Alerts for protected attributes, globally ignored fields, and naming suggestions, with options to apply suggestions.
 
 ## 3. Edge Types
@@ -119,6 +121,7 @@ Manage the different kinds of relationships between entities.
 -   **Add Property**: Add custom properties (name, type, description, required status) to an edge type.
 -   **Quick Add Common Types**: Pre-fills common relationship types like `WorksFor`, `Uses`, `Creates`, `MemberOf`, `Manages`, `Contains`.
 -   **Add New Edge Type**: Manually add a new custom edge type with a name and description.
+-   **LLM Suggest Edge Types**: AI-generated suggestions for edge type descriptions based on your vault content.
 
 ### Available Default Edge Types
 
@@ -141,3 +144,45 @@ This section allows you to rigorously define permissible relationships between d
 ### Suggested Edge Mappings
 
 Based on your discovered entity types, the system will suggest common and logical mappings to help you quickly build out your graph's relational structure. You can add these individually or "Add All" suggestions.
+
+## AI-Enhanced Features
+
+The Ontology Manager integrates AI capabilities throughout the interface to assist with schema generation and maintenance.
+
+### Individual LLM Suggest Buttons
+
+Throughout the interface, "LLM Suggest" buttons provide context-aware AI assistance:
+
+-   **Entity Descriptions**: Generate descriptions for individual entity types based on your vault content and usage patterns.
+-   **Property Descriptions**: Suggest descriptions for individual properties based on their name, type, and context.
+-   **Edge Type Descriptions**: Generate descriptions for relationship types based on how entities connect in your vault.
+
+Each suggestion includes a confirmation modal where you can review, edit, and approve before applying.
+
+### Bulk Generation Operations
+
+Efficient batch operations for large-scale schema management:
+
+-   **Generate All Entity Descriptions**: Process all entity types at once with customizable filter modes.
+-   **Generate All Property Descriptions**: Batch generate property descriptions across all entity types.
+-   **Generate Complete Ontology**: Comprehensive schema generation including entities, properties, edge types, and valid mappings between them.
+
+### Filter Modes
+
+All bulk generation operations support three filter modes to control scope:
+
+1.  **Regenerate All**: Process all items, overwriting existing descriptions (use for schema refresh).
+2.  **Skip User Defined**: Only generate for items without user-defined descriptions (preserves manual work).
+3.  **New Only**: Generate only for newly discovered items (incremental schema growth).
+
+### Supported LLM Providers
+
+The Ontology Manager supports five LLM providers for AI-enhanced features:
+
+-   **OpenAI**: GPT-4 and GPT-3.5 models
+-   **Anthropic Claude**: Claude 3 series models
+-   **Google Gemini**: Gemini Pro and Ultra models
+-   **Ollama**: Fully private local models (requires local installation)
+-   **OpenRouter**: Access to multiple model providers through a single API
+
+Configure your preferred provider in the plugin settings under "LLM Configuration".
