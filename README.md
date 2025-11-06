@@ -156,22 +156,22 @@ Explore the comprehensive documentation for MegaMem to get started and deepen yo
 ### Getting Started
 
 - [**Introduction**](https://c-bjorn.github.io/MegaMem/) - Overview of MegaMem and its core concepts.
-- [**Quick Start Guide**](https://c-bjorn.github.io/MegaMem/quick-start) - Get up and running in minutes.
-- [**Plugin Settings**](https://c-bjorn.github.io/MegaMem/plugin-settings) - Detailed reference for all configuration options.
+- [**Quick Start Guide**](https://c-bjorn.github.io/MegaMem/#/quick-start) - Get up and running in minutes.
+- [**Plugin Settings**](https://c-bjorn.github.io/MegaMem/#/plugin-settings) - Detailed reference for all configuration options.
 
 ### Advanced Guides
 
-- [**Database Setup**](https://c-bjorn.github.io/MegaMem/guides/database-setup) - Configure your preferred graph database.
-- [**Claude Desktop Integration**](https://c-bjorn.github.io/MegaMem/guides/claude-integration) - Connect MegaMem with Claude Desktop.
-- [**Custom Entity Types & Ontology Manager**](https://c-bjorn.github.io/MegaMem/guides/ontology-manager) - Define and manage your custom data schemas.
-- [**Sync Manager**](https://c-bjorn.github.io/MegaMem/guides/sync-manager) - Control how your notes are synchronized with the knowledge graph.
-- [**MCP Commands**](https://c-bjorn.github.io/MegaMem/mcp-commands) - Reference for available Model Context Protocol commands.
+- [**Database Setup**](https://c-bjorn.github.io/MegaMem/#/guides/database-setup) - Configure your preferred graph database.
+- [**Claude Desktop Integration**](https://c-bjorn.github.io/MegaMem/#/guides/claude-integration) - Connect MegaMem with Claude Desktop.
+- [**Custom Entity Types & Ontology Manager**](https://c-bjorn.github.io/MegaMem/#/guides/ontology-manager) - Define and manage your custom data schemas.
+- [**Sync Manager**](https://c-bjorn.github.io/MegaMem/#/guides/sync-manager) - Control how your notes are synchronized with the knowledge graph.
+- [**MCP Commands**](https://c-bjorn.github.io/MegaMem/#/mcp-commands) - Reference for available Model Context Protocol commands.
 
 ### Community & Contribution
 
-- [**Roadmap**](https://c-bjorn.github.io/MegaMem/roadmap) - See what's coming next for MegaMem.
-- [**Contributing Guide**](https://c-bjorn.github.io/MegaMem/contributing) - Learn how to contribute to the project.
-- [**FAQ**](https://c-bjorn.github.io/MegaMem/faq) - Find answers to frequently asked questions.
+- [**Roadmap**](https://c-bjorn.github.io/MegaMem/#/roadmap) - See what's coming next for MegaMem.
+- [**Contributing Guide**](https://c-bjorn.github.io/MegaMem/#/contributing) - Learn how to contribute to the project.
+- [**FAQ**](https://c-bjorn.github.io/MegaMem/#/faq) - Find answers to frequently asked questions.
 
 ## 🤝 Community & Support
 
