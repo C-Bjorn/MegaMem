@@ -181,16 +181,20 @@ Configure your graph database backend.
 
 ## Python Environment
 
-**IMPORTANT**: Manage Python dependencies for the plugin. "Install Dependencies" must be done before anything will work properly.
+**IMPORTANT**: This section appears first in the plugin settings. Python dependencies must be installed before anything will work properly.
 
 ### Python Path (Optional) <i data-lucide="check-circle"></i>
 - Description: Specify custom Python executable path (leave empty for auto-detection)
 - Developer Note: Allows custom Python interpreter specification.
 
 ### Python Dependency Management
+**Installation Methods:**
+- **UV Package Manager (Recommended)**: Default installation method with better cross-platform compatibility for macOS, Windows, and Linux. Handles platform-specific archive formats automatically.
+- **System Python**: For advanced users who prefer to use their own Python installation.
+
 #### Actions:
 - **Check Dependencies** <i data-lucide="search"></i>: Check if Graphiti Python dependencies are installed
-- **Install Dependencies** <i data-lucide="package-plus"></i>: Install Graphiti and required Python packages using hybrid pip/uv approach
+- **Install Dependencies** <i data-lucide="package-plus"></i>: Install Graphiti and required Python packages. The default UV method downloads the uv package manager and uses it to create an isolated Python environment with all required dependencies.
 
 ## Sync Configuration <i data-lucide="alert-triangle"></i>
 

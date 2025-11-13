@@ -6,7 +6,7 @@ Transform your Obsidian vault into a temporal knowledge graph powered by Graphit
 
 ### ALPHA Launch
 
-**IMPORTANT** _Not all features and functions are fully tested. We actively use this plugin every day with our intenral team, working on Windows with Neo4j. Although the infrastructure is there to support Mac/Linux & other db providers, we haven't tested them yet._
+**IMPORTANT** _Not all features and functions are fully tested. We actively use this plugin every day with our internal team, working on Windows with Neo4j. Early tests on macOS are working great! Although the infrastructure is there to support Linux & other database providers, we haven't fully tested them yet._
 
 - **Development Repo** is private, along with obsidian source code. As we near Beta Launch, all source code will be pushed to this repo and request made to Obsidian Community Plugins.
 - **Early beta-testers** are encouraged to contact the developer for a full obsidian template and customization services. Trust me, even at this stage, it's worth it(!)
@@ -45,7 +45,7 @@ Transform your Obsidian vault into a temporal knowledge graph powered by Graphit
 
 ### Prerequisites
 
-1. **Obsidian**: Version 0.15.0 or higher
+1. **Obsidian**: Version 1.10.1 or higher
 2. **Database**: Neo4j Desktop or FalkorDB (via Docker)
 3. **Python**: Version 3.11+ (for MCP server)
 4. **Node.js**: Version 18+ (for development)

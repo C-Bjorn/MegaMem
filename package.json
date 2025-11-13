@@ -1,7 +1,7 @@
 {
   "name": "megamem-mcp",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.5",
   "description": "Obsidian plugin and MCP server for GraphRAG.",
   "author": "Casey Bjørn",
   "license": "MIT",

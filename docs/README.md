@@ -68,9 +68,9 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 
 | Component    | Minimum Version             | Recommended   |
 | ------------ | --------------------------- | ------------- |
-| **Obsidian** | 1.5.0+                      | Latest stable |
+| **Obsidian** | 1.10.1+                     | Latest stable |
 | **Node.js**  | 18.0+                       | 20.0+         |
-| **Python**   | 3.10+                       | 3.11+         |
+| **Python**   | 3.11+                       | 3.11+         |
 | **Database** | Neo4j 5.0+ or FalkorDB 1.0+ | Latest stable |
 
 ## Architecture Overview

@@ -52,7 +52,11 @@ In Plugin Settings, add your LLM keys and configuration (select "Load Defaults" 
 In Plugin Settings, enter the Database Configuration and click "Test Connection" and then "Initialize Schema"
 
 ### Step 4: Python Dependencies
-Under Python Environment, click "Install Dependencies"
+Under Python Environment (first accordion section), click "Install Dependencies".
+
+**Installation Method:** The plugin now defaults to using the UV Package Manager, which is recommended for most users and provides better cross-platform compatibility (macOS, Windows, Linux). System Python is available for advanced users who prefer their own Python installation.
+
+**Note:** If you encounter installation issues on macOS or Windows, the plugin uses platform-specific extraction methods to ensure proper setup. The installation process will handle tar.gz archives on macOS/Linux and zip archives on Windows automatically.
 
 ### Step 5: Basic Setup Complete
 For basic functionality - leave everything else default.
@@ -65,10 +69,11 @@ For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-
 1. **Generate MCP Configuration**
    - Go to Plugin Settings → Servers section
    - Click "Generate Config" button
-   - Copy the generated configuration
+   - Copy the generated configuration (formatted with `mcpServers` wrapper for Claude Desktop compatibility)
 
 2. **Apply to Your MCP Client**
-   - Paste the configuration into your Claude Desktop config or other MCP client
+   - For Claude Desktop: Paste the configuration into your `claude_desktop_config.json` file
+   - For other MCP clients: Use the configuration as directed by your client's documentation
    - Restart your MCP client
    - Verify connection in chat interface
 
