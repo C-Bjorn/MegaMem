@@ -159,8 +159,10 @@ Search for notes in Obsidian vault by filename and/or content (aliases: mv, my v
 | `search_mode` | `string` | Search mode: filename, content, or both | No | `both` |
 | `max_results` | `integer` | Maximum number of results to return | No | `100` |
 | `include_context` | `boolean` | Whether to include context snippets for content matches | No | `True` |
-| `path` | `string` | Path to search within the vault (optional) | No | |
+| `path` | `string` | Scopes results to this folder path — only notes within this path are returned | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
+
+**Filename search behavior:** Uses 3-tier fuzzy matching: (1) Obsidian's `prepareFuzzySearch` for approximate matches, (2) word-subsequence fallback for reordered words and misspellings. Reordered words and approximate spellings are supported.
 
 ### `read_obsidian_note`
 
@@ -170,7 +172,8 @@ Read a specific note from Obsidian (aliases: mv, my vault, obsidian)
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `path` | `string` | Note path | Yes | |
+| `path` | `string` | Note path. `.md` extension is auto-appended if path has no extension (e.g. `MyNote` → `MyNote.md`) | Yes | |
+| `include_line_map` | `boolean` | Include line-by-line mapping and section detection for precise editing (increases response size ~2x) | No | `false` |
 | `vault_id` | `string` | Vault ID (optional) | No | |
 
 ### `update_obsidian_note`
@@ -179,7 +182,7 @@ Update content of an existing note using various editing modes (aliases: mv, my 
 
 Editing Modes:
 - full_file: Replace entire file content (default, backward compatible)
-- frontmatter_only: Update only YAML frontmatter properties
+- frontmatter_only: Update only YAML frontmatter properties. **Empty markdown links `[text]()` are automatically skipped and never written.** The template `links:` block sequence is cleaned of placeholder entries on first write.
 - append_only: Append content to end of file
 - range_based: Replace content within specific line/character ranges
 - editor_based: Use predefined editor methods like insert_after_heading
@@ -238,7 +241,11 @@ Explore folder structure in an Obsidian vault (query by natural language or path
 | `path` | `string` | Explicit vault path to explore (optional) | No | |
 | `format` | `string` | Preferred output format: tree|flat|paths|smart | No | `smart` |
 | `max_depth` | `integer` | Maximum traversal depth | No | `3` |
+| `include_files` | `boolean` | Include files alongside folders in the response | No | `false` |
+| `extension_filter` | `array` | Filter returned files by extension (e.g. `["md", "canvas"]`). Only used when `include_files=true` | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
+
+**When `include_files=true`:** Response includes a `files` array with objects containing `{name, path, basename, extension, size, mtime}` and a `totalFiles` count alongside the standard folder tree.
 
 ### `create_note_with_template`
 

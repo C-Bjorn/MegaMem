@@ -513,6 +513,16 @@ Example: To edit line 38, first call read_obsidian_note with include_line_map=tr
                         "vault_id": {
                             "type": "string",
                             "description": "Vault ID (optional)"
+                        },
+                        "include_files": {
+                            "type": "boolean",
+                            "description": "Include files in the folder listing alongside folders. Default false.",
+                            "default": False
+                        },
+                        "extension_filter": {
+                            "type": "array",
+                            "description": "Optional list of file extensions to filter results (e.g. ['md', 'canvas']). Only used when include_files is true.",
+                            "items": {"type": "string"}
                         }
                     },
                     "required": []
@@ -1234,7 +1244,13 @@ WORKFLOW:
         try:
             logger.info("[BACKGROUND] Starting MegaMem client initialization...")
             setup_environment_variables(bridge_config)
-            
+
+            # @purpose: Yield the event loop before any blocking work
+            # @depends: asyncio.sleep
+            # @results: server.run() processes and sends the MCP initialize response
+            #           before BGE/Graphiti loading blocks the event loop (~36s)
+            await asyncio.sleep(1.0)
+
             megamem_client = await init_megamem_bridge(bridge_config, debug=True)
             if not megamem_client:
                 raise ValueError("MegaMem client initialization failed (returned None).")

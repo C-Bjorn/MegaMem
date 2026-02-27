@@ -155,11 +155,14 @@ class FileTools:
 
     async def read_obsidian_note(self, path: str, vault_id: Optional[str] = None, include_line_map: bool = False) -> Dict[str, Any]:
         """Read a specific note from Obsidian.
-        
+
         Args:
-            path: Path to the note
+            path: Path to the note (e.g. 'folder/note' or 'folder/note.md'). If no file
+                extension is provided (no '.' in the last path segment), .md is automatically
+                appended before lookup, so 'MyNote' resolves to 'MyNote.md'.
             vault_id: Optional vault ID
-            include_line_map: Include line-by-line mapping for precise editing (increases response size)
+            include_line_map: Include line-by-line mapping and section detection for precise
+                editing (increases response size ~2x)
         """
         # Validate vault connection
         resolved_vault_id, error = await self._validate_vault_connection(vault_id)
@@ -543,7 +546,9 @@ class FileTools:
         query: str = "",
         format: str = "smart",
         max_depth: int = 3,
-        vault_id: Optional[str] = None
+        vault_id: Optional[str] = None,
+        include_files: bool = False,
+        extension_filter: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Explore folder structure in the vault.
@@ -554,6 +559,13 @@ class FileTools:
             format: one of ['tree', 'flat', 'paths', 'smart']
             max_depth: max recursion depth for folder traversal
             vault_id: optional vault id
+            include_files: when True, also return files found inside the target path alongside
+                folders. The response gains 'files' (list) and 'totalFiles' (int) fields.
+                Each file entry includes: name, path, basename, extension, size, mtime.
+                Default: False (backward-compatible).
+            extension_filter: optional list of extensions to restrict returned files when
+                include_files=True (e.g. ['md', 'canvas']). Has no effect when include_files
+                is False.
 
         Behavior:
             - Validates vault
@@ -561,8 +573,10 @@ class FileTools:
             - Uses a standardized response structure:
               {
                 success: bool,
-                results: [...],
+                results: [...folders],
                 totalFolders: int,
+                files: [...files],       # only when include_files=True
+                totalFiles: int,         # only when include_files=True
                 formatUsed: str,
                 query: Optional[str],
                 path: Optional[str],
@@ -586,8 +600,13 @@ class FileTools:
         params = {
             "format": fmt,
             "maxDepth": int(max_depth),
-            "vaultId": resolved_vault_id
+            "vaultId": resolved_vault_id,
+            "include_files": bool(include_files)
         }
+
+        # Pass extension_filter when provided (requires include_files=True to take effect)
+        if extension_filter is not None:
+            params["extension_filter"] = list(extension_filter)
 
         # Prefer explicit path when provided
         if path:
@@ -640,7 +659,7 @@ class FileTools:
                 results = [root_entry]
                 total = 1
 
-            return {
+            out: Dict[str, Any] = {
                 "success": success_flag,
                 "results": results,
                 "totalFolders": total,
@@ -649,6 +668,13 @@ class FileTools:
                 "path": path or params.get("path"),
                 "vaultId": resolved_vault_id
             }
+
+            # Propagate files list when include_files was requested
+            if include_files and isinstance(payload, dict):
+                out["files"] = payload.get("files", [])
+                out["totalFiles"] = payload.get("totalFiles", 0)
+
+            return out
         except Exception as e:
             logger.error(f"Error exploring vault folders: {e}")
             return {"success": False, "error": str(e), "vaultId": resolved_vault_id}

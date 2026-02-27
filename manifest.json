@@ -4,7 +4,7 @@
   "description": "Integrate Obsidian notes with Graphiti temporal knowledge graphs through YAML schemas and MCP protocol for AI assistant access.",
   "author": "Casey Bjørn",
   "authorUrl": "https://github.com/kcsf/Graphiti-Obsidian-MCP",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "minAppVersion": "1.10.1",
   "main": "main.js",
   "isDesktopOnly": true
