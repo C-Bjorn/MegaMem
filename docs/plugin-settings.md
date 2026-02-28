@@ -196,6 +196,13 @@ Configure your graph database backend.
 - **Check Dependencies** <i data-lucide="search"></i>: Check if Graphiti Python dependencies are installed
 - **Install Dependencies** <i data-lucide="package-plus"></i>: Install Graphiti and required Python packages. The default UV method downloads the uv package manager and uses it to create an isolated Python environment with all required dependencies.
 
+### Python Environment Location <i data-lucide="check-circle"></i>
+- Description: The Python virtual environment is **vault-specific** — each Obsidian vault gets its own isolated environment to prevent conflicts between vaults.
+- **Windows**: `%LOCALAPPDATA%\MegaMem\python\{vault-name}\venv`
+- **macOS**: `~/Library/Application Support/MegaMem/python/{vault-name}/venv`
+- **Linux**: `~/.local/share/MegaMem/python/{vault-name}/venv`
+- Developer Note: On first upgrade from an older version, the shared venv is automatically copied to the vault-specific location. No manual action required.
+
 ## Sync Configuration <i data-lucide="alert-triangle"></i>
 
 Configure automatic synchronization behavior. **WARNING**: This works, but we HIGHLY RECOMMEND NOT USING IT. It is not thoroughly tested, conflicts may arise between Included & Excluded folders and time intervals. Much work remains to be done.
@@ -254,13 +261,22 @@ Configure how knowledge is organized in the graph database.
 - Description: Default namespace when strategy is "custom" or when other strategies fail
 - Developer Note: Fallback namespace configuration.
 
+### Global Extraction Instructions <i data-lucide="check-circle"></i>
+- Description: Free-text instructions injected into Graphiti's extraction prompts for all notes. Use this to guide the LLM on what to extract, what to ignore, or how to interpret your vault's content.
+- Developer Note: Applies globally to all synced notes. Can be overridden per namespace in Custom Folder Mappings.
+
 ### Enable Folder Namespacing <i data-lucide="check-circle"></i>
 - Description: Use top-level folder names as namespaces. Subfolders are not supported.
 - Developer Note: Top-level folder-based namespace generation.
 
 ### Custom Folder Mappings <i data-lucide="check-circle"></i>
-- Description: Map specific folders to custom group_id namespaces. Leave empty to use automatic folder names.
+- Description: Map specific folders to custom group_id namespaces. Leave empty to use automatic folder names. Each mapping row also supports per-namespace extraction instructions, saga grouping, and a saga property key.
 - Developer Note: Advanced folder-to-namespace mapping with auto-population.
+
+**Per-mapping options (available on each folder mapping row):**
+- **Custom Extraction Instructions**: Override the global extraction instructions for this namespace only. When left empty, the vault-wide Global Extraction Instructions apply.
+- **Saga Grouping**: How episodes from this namespace are grouped into sagas. Options: `By Note Type (default)`, `Single Saga for namespace`, `No saga grouping`, `Custom frontmatter property`.
+- **Saga Property Key**: *(Visible when Saga Grouping = "Custom frontmatter property")* The frontmatter key whose value is used as the saga name.
 
 #### Actions:
 - **Add Folder Mapping** <i data-lucide="folder-plus"></i>: Add a new folder-to-namespace mapping

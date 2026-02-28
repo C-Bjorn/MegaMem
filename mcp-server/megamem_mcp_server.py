@@ -231,7 +231,9 @@ class ObsidianMegaMemMCPServer:
                         "max_nodes": {"type": "integer", "description": "Max results", "default": 10},
                         "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"},
                         "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"},
-                        "entity_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by entity types (e.g., ['Person', 'Company'])"}
+                        "entity_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by entity types (e.g., ['Person', 'Company'])"},
+                        "node_labels": {"type": "array", "items": {"type": "string"}, "description": "Filter by node label types (e.g. ['Person', 'Organization'])"},
+                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"}
                     },
                     "required": ["query"]
                 }
@@ -245,7 +247,9 @@ class ObsidianMegaMemMCPServer:
                         "query": {"type": "string", "description": "Search query"},
                         "max_facts": {"type": "integer", "description": "Max results", "default": 10},
                         "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"},
-                        "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"}
+                        "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"},
+                        "node_labels": {"type": "array", "items": {"type": "string"}, "description": "Filter by node label types (e.g. ['Person', 'Organization'])"},
+                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"}
                     },
                     "required": ["query"]
                 }
@@ -755,6 +759,12 @@ WORKFLOW:
                 filters = SearchFilters()
                 if entity_types:
                     filters.node_labels = entity_types
+                node_labels = arguments.get("node_labels")
+                if node_labels:
+                    filters.node_labels = node_labels
+                property_filters = arguments.get("property_filters")
+                if property_filters:
+                    filters.property_filters = property_filters
 
                 results = await self.megamem_client._search(
                     query=arguments["query"],
@@ -791,11 +801,20 @@ WORKFLOW:
                     search_config = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
                 search_config.limit = max_facts
 
+                fact_filters = SearchFilters()
+                fact_node_labels = arguments.get("node_labels")
+                if fact_node_labels:
+                    fact_filters.node_labels = fact_node_labels
+                fact_property_filters = arguments.get("property_filters")
+                if fact_property_filters:
+                    fact_filters.property_filters = fact_property_filters
+
                 results = await self.megamem_client._search(
                     query=arguments["query"],
                     config=search_config,
                     group_ids=group_ids,
-                    center_node_uuid=center_node_uuid
+                    center_node_uuid=center_node_uuid,
+                    search_filter=fact_filters
                 )
 
                 formatted_facts = [self._format_fact_result(

@@ -74,6 +74,9 @@ class BridgeConfig:
     namespace_strategy: str = "vault"  # 'vault', 'folder', 'property', 'custom'
     folder_namespace_mappings: Optional[List[Dict[str, str]]] = None
 
+    # Extraction instruction overrides (Graphiti v0.28.1+ custom_extraction_instructions)
+    global_extraction_instructions: Optional[str] = None
+
     # Episode source description
     source_description: Optional[str] = None
 
@@ -177,6 +180,9 @@ class BridgeConfig:
             # Episode source description
             source_description=config_dict.get(
                 'source_description') or config_dict.get('sourceDescription'),
+
+            # Extraction instruction overrides
+            global_extraction_instructions=config_dict.get('global_extraction_instructions') or config_dict.get('globalExtractionInstructions') or None,
 
             # Optional namespace override (mirrors source_description pass-through)
             group_id=config_dict.get('group_id') or config_dict.get('groupId'),

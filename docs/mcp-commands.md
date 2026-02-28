@@ -78,6 +78,8 @@ Search for nodes in the memory graph (aliases: mm, megamem, memory)
 | `query` | `string` | Search query | Yes | |
 | `max_nodes` | `integer` | Max results | No | `10` |
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
+| `node_labels` | `array` | Filter results to nodes with specific label types (e.g. `["Person", "Organization"]`) | No | |
+| `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"status": "active"}`) | No | |
 
 ### `search_memory_facts`
 
@@ -90,6 +92,8 @@ Search for facts/relationships in the memory graph (aliases: mm, megamem, memory
 | `query` | `string` | Search query | Yes | |
 | `max_facts` | `integer` | Max results | No | `10` |
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
+| `node_labels` | `array` | Filter by node label types (e.g. `["Person", "Organization"]`) | No | |
+| `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"group_id": "Journal"}`) | No | |
 
 ### `get_episodes`
 

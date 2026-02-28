@@ -5,7 +5,7 @@ mcp>=1.0.0
 # Install ALL provider extras for maximum compatibility (matches original install.py behavior)
 # This allows users to switch between providers without reinstalling dependencies
 # Upgraded to 0.22.x for MinHash dedupe, multilingual support, and unicode improvements
-graphiti-core[falkordb,anthropic,google-genai,azure-openai,groq,voyage,sentence-transformers]~=0.22.0
+graphiti-core[falkordb,anthropic,google-genai,azure-openai,groq,voyage,sentence-transformers]>=0.28.1
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 

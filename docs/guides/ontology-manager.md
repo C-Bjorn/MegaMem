@@ -186,3 +186,28 @@ The Ontology Manager supports five LLM providers for AI-enhanced features:
 -   **OpenRouter**: Access to multiple model providers through a single API
 
 Configure your preferred provider in the plugin settings under "LLM Configuration".
+
+## Per-Namespace Configuration
+
+Each folder mapping in your namespace settings (configured under **Knowledge Namespacing → Custom Folder Mappings** in plugin settings) supports per-namespace options that control how notes in that namespace are processed and stored. These settings appear on each folder mapping row.
+
+### Custom Extraction Instructions
+
+An optional free-text field that overrides the vault-wide **Global Extraction Instructions** for notes in this namespace only. Use this when a specific folder requires different extraction guidance — for example, telling the LLM to focus only on action items in your Tasks folder, or to extract entities differently for your Journal namespace.
+
+When left empty, the global extraction instructions (set in plugin settings) apply.
+
+### Saga Grouping
+
+Controls how episodes from this namespace are grouped into **Sagas** — ordered timeline nodes that link related episodes together chronologically.
+
+| Option | Behavior |
+|---|---|
+| `By Note Type (default)` | Creates sagas named `{note-type}-{group_id}` (e.g. `daily-note-Journal`) |
+| `Single Saga for namespace` | All notes in this namespace share one saga named `all-{group_id}` |
+| `No saga grouping` | Episodes are stored without saga connections |
+| `Custom frontmatter property` | The saga name is read from a frontmatter key you specify |
+
+### Saga Property Key
+
+*(Visible when Saga Grouping = "Custom frontmatter property")* Specifies which frontmatter key's value to use as the saga name. For example, if set to `project`, a note with `project: Acme Corp` in its frontmatter will be grouped under the `Acme Corp` saga.

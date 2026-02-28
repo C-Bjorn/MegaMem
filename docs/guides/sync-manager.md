@@ -96,3 +96,18 @@ Upon completion of a sync operation, a notification will appear in Obsidian:
 
 -   **Success**: `✅ [Sync Type] completed: [X] notes processed`
 -   **Failure**: `❌ [Sync Type] failed: [Error Message]`
+
+## Sagas
+
+Sagas are lightweight graph nodes that group related episodes into ordered, chronological timelines. When saga grouping is enabled for a namespace, Graphiti creates `Saga` nodes in the knowledge graph and connects each episode to its saga via a `HAS_EPISODE` edge. Sequential episodes within the same saga are also linked via `NEXT_EPISODE` edges, enabling chronological traversal through your knowledge timeline.
+
+### Configuring Sagas
+
+Saga grouping is configured **per namespace** in the folder mapping rows under **Knowledge Namespacing → Custom Folder Mappings** in plugin settings. Each namespace can use one of four grouping strategies:
+
+-   **By Note Type (default)**: Groups episodes by note type and namespace (e.g. `daily-note-Journal`).
+-   **Single Saga for namespace**: All notes in the namespace share a single saga.
+-   **No saga grouping**: Episodes are stored without saga connections.
+-   **Custom frontmatter property**: The saga name is derived from a frontmatter key you specify.
+
+See [Ontology Manager](ontology-manager.md) for full per-namespace configuration details.

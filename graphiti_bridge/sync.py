@@ -1299,16 +1299,67 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         else:
             group_id = resolve_namespace(note_path, metadata, config, logger)
 
+        # Resolve custom_extraction_instructions: namespace override > vault-level > None
+        custom_extraction_instructions = None
+        global_instructions = getattr(config, 'global_extraction_instructions', None) or None
+        if hasattr(config, 'folder_namespace_mappings') and config.folder_namespace_mappings:
+            try:
+                note_posix = Path(note_path).as_posix()
+                vault_posix = Path(getattr(config, 'vault_path', '') or '').as_posix().rstrip('/')
+                rel_path = note_posix
+                if vault_posix and note_posix.lower().startswith((vault_posix + '/').lower()):
+                    rel_path = note_posix[len(vault_posix) + 1:]
+                for mapping in config.folder_namespace_mappings:
+                    folder_path = mapping.get('folderPath', '')
+                    if folder_path and rel_path.lower().startswith(folder_path.lower().rstrip('/') + '/'):
+                        ns_instructions = mapping.get('customExtractionInstructions') or None
+                        custom_extraction_instructions = ns_instructions or global_instructions
+                        break
+            except Exception:
+                pass
+        if custom_extraction_instructions is None:
+            custom_extraction_instructions = global_instructions
+
+        # Resolve saga name and previous episode UUID for timeline chaining
+        saga_name = None
+        saga_previous_uuid = None
+        if hasattr(config, 'folder_namespace_mappings') and config.folder_namespace_mappings:
+            try:
+                note_posix = Path(note_path).as_posix()
+                vault_posix = Path(getattr(config, 'vault_path', '') or '').as_posix().rstrip('/')
+                rel_path = note_posix
+                if vault_posix and note_posix.lower().startswith((vault_posix + '/').lower()):
+                    rel_path = note_posix[len(vault_posix) + 1:]
+                for mapping in config.folder_namespace_mappings:
+                    folder_path = mapping.get('folderPath', '')
+                    if folder_path and rel_path.lower().startswith(folder_path.lower().rstrip('/') + '/'):
+                        saga_grouping = mapping.get('sagaGrouping', 'byNoteType')
+                        saga_property_key = mapping.get('sagaPropertyKey')
+                        note_type = metadata.get('type') if metadata else None
+                        saga_name = resolve_saga_name(
+                            saga_grouping, saga_property_key, group_id, note_type, metadata or {}
+                        )
+                        break
+            except Exception:
+                pass
+        if saga_name:
+            sync_records = _load_sync_records(getattr(config, 'vault_path', None), debug_mode, logger)
+            saga_previous_uuid = lookup_saga_previous_uuid(saga_name, sync_records)
+            if debug_mode:
+                logger.debug(f"Saga: name='{saga_name}', previous_uuid='{saga_previous_uuid}'")
+
         # Choose episode creation strategy based on ontology setting
         if config.use_custom_ontology:
             # Use custom entity episodes with Pydantic models
             graphiti_result = await create_custom_entity_episode(
-                graphiti, note_name, clean_text, reference_time, group_id, metadata, logger, database_type, config, debug_mode
+                graphiti, note_name, clean_text, reference_time, group_id, metadata, logger, database_type, config, debug_mode, custom_extraction_instructions,
+                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid
             )
         else:
             # Use generic text episodes
             graphiti_result = await create_generic_text_episode(
-                graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, debug_mode, metadata
+                graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, debug_mode, metadata, custom_extraction_instructions,
+                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid
             )
 
         note_end_time = datetime.now()
@@ -1352,6 +1403,7 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
                 'status': 'success',
                 'namespace': group_id,
                 'episode_uuid': episode_uuid,
+                'saga_name': saga_name,
                 'reference_time': reference_time.isoformat(),
                 'processing_duration_seconds': processing_duration,
                 'start_time': note_start_time.isoformat(),
@@ -1537,7 +1589,8 @@ def serialize_value(value, seen=None, depth=0, max_depth=3):
 
 
 async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
-                                      reference_time: datetime, group_id: str, logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, metadata: Optional[Dict[str, Any]] = None):
+                                      reference_time: datetime, group_id: str, logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, metadata: Optional[Dict[str, Any]] = None, custom_extraction_instructions: Optional[str] = None,
+                                      saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None):
     """Create a generic text episode using EpisodeType.text"""
 
     try:
@@ -1597,6 +1650,16 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
                 logger.debug(
                     f"Received previous_episode_uuids from config: {prev_uuids}")
 
+        # Inject custom extraction instructions when provided (Graphiti v0.28.1+)
+        if custom_extraction_instructions:
+            episode_kwargs['custom_extraction_instructions'] = custom_extraction_instructions
+
+        # Inject saga name and previous episode UUID for timeline chaining (Graphiti v0.28.1+)
+        if saga_name:
+            episode_kwargs['saga'] = saga_name
+        if saga_previous_uuid:
+            episode_kwargs['saga_previous_episode_uuid'] = saga_previous_uuid
+
         # Create episode with database-specific parameters
         result = await graphiti.add_episode(**episode_kwargs)
 
@@ -1619,7 +1682,8 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
 
 async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str,
                                        reference_time: datetime, group_id: str,
-                                       metadata: Dict[str, Any], logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False):
+                                       metadata: Dict[str, Any], logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, custom_extraction_instructions: Optional[str] = None,
+                                       saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None):
     """Create a custom entity episode using Graphiti Custom Entities API"""
 
     try:
@@ -1641,7 +1705,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
 
         # No custom entity types available, fall back to generic episode
         if not entity_types:
-            return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config)
+            return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid)
 
         # Use source description from frontmatter type if available, else fallback to config/default
         frontmatter_type = None
@@ -1692,6 +1756,16 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
                 logger.debug(
                     f"Received previous_episode_uuids from config: {prev_uuids}")
 
+        # Inject custom extraction instructions when provided (Graphiti v0.28.1+)
+        if custom_extraction_instructions:
+            episode_kwargs['custom_extraction_instructions'] = custom_extraction_instructions
+
+        # Inject saga name and previous episode UUID for timeline chaining (Graphiti v0.28.1+)
+        if saga_name:
+            episode_kwargs['saga'] = saga_name
+        if saga_previous_uuid:
+            episode_kwargs['saga_previous_episode_uuid'] = saga_previous_uuid
+
         # Create custom entity episode using Graphiti Custom Entities API
         result = await graphiti.add_episode(**episode_kwargs)
 
@@ -1704,7 +1778,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
             logger.warning(
                 f"Custom entity episode creation failed: {e}, falling back to generic episode")
 
-        return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config)
+        return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid)
 
 
 def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeConfig, logger) -> str:
@@ -1864,6 +1938,61 @@ def _resolve_custom_folder_mapping(note_path: str, folder_mappings: list, debug_
         if debug_mode:
             logger.warning(f"Error in custom folder mapping resolution: {e}")
         return None
+
+
+def resolve_saga_name(
+    saga_grouping: str,
+    saga_property_key: Optional[str],
+    group_id: str,
+    note_type: Optional[str],
+    frontmatter: dict,
+) -> Optional[str]:
+    """Resolve the saga name for an episode based on namespace saga grouping strategy."""
+    if saga_grouping == 'none':
+        return None
+    if saga_grouping == 'singleSaga':
+        return f"all-{group_id}"
+    if saga_grouping == 'customProperty' and saga_property_key:
+        prop_value = frontmatter.get(saga_property_key)
+        if prop_value:
+            safe = str(prop_value).lower().replace(' ', '-')[:80]
+            return f"{safe}-{group_id}"
+        return None  # no value = no saga
+    # default: byNoteType
+    if note_type:
+        safe_type = str(note_type).lower().replace(' ', '-')[:40]
+        return f"{safe_type}-{group_id}"
+    return None  # no type = no saga
+
+
+def lookup_saga_previous_uuid(saga_name: str, sync_records: list) -> Optional[str]:
+    """Find the most recent episode UUID in a saga from existing sync records."""
+    matching = [
+        entry
+        for record in sync_records
+        for entry in record.get('syncs', [])
+        if entry.get('saga_name') == saga_name and entry.get('episode_uuid')
+    ]
+    if not matching:
+        return None
+    matching.sort(key=lambda e: e.get('last_sync', ''), reverse=True)
+    return matching[0].get('episode_uuid')
+
+
+def _load_sync_records(vault_path: Optional[str], debug_mode: bool, logger) -> list:
+    """Load sync records from sync.json for saga chain lookups."""
+    if not vault_path:
+        return []
+    sync_json_path = Path(vault_path) / '.obsidian' / 'plugins' / 'megamem-mcp' / 'sync.json'
+    try:
+        if sync_json_path.exists():
+            with open(sync_json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get('sync_records', [])
+    except Exception as e:
+        if debug_mode and logger:
+            logger.debug(f"Could not load sync records for saga lookup: {e}")
+    return []
 
 
 def extract_reference_time(metadata: Dict[str, Any], logger, database_type: str = 'neo4j') -> datetime:
