@@ -74,6 +74,14 @@ try:
 except ImportError:
     WebSocketServer, FileTools, VaultResolver = None, None, None
 
+# CLI file tools — optional, activated via MEGAMEM_USE_CLI=true env var
+try:
+    from cli_file_tools import CLIFileTools
+    from obsidian_cli import detect_obsidian_binary
+except ImportError:
+    CLIFileTools = None  # type: ignore
+    detect_obsidian_binary = None  # type: ignore
+
 # Bridge imports
 try:
     from graphiti_bridge.config import BridgeConfig, setup_environment_variables
@@ -1213,8 +1221,37 @@ WORKFLOW:
             logger.info(
                 f"[CONFIG] WebSocket port: {ws_config['port']} (from OBSIDIAN_CONFIG_PATH)")
 
-            # Always start with WebSocket discovery to determine process role quickly
-            websocket_success = await self._discover_or_start_websocket_server_with_autolaunch(ws_config, obsidian_config)
+            # CLI file tools — activated via useCliFileTools: true in plugin settings (data.json)
+            # Falls back to env var MEGAMEM_USE_CLI=true for headless/dev use
+            _use_cli = bool(obsidian_config.get("useCliFileTools", False)) or \
+                       os.environ.get("MEGAMEM_USE_CLI", "false").lower() in ("true", "1", "yes")
+
+            if _use_cli and CLIFileTools and detect_obsidian_binary:
+                cli_binary = detect_obsidian_binary()
+                if cli_binary:
+                    logger.info(f"[CLI] useCliFileTools=true — activating CLI backend: {cli_binary}")
+                    from obsidian_cli import ObsidianCLI
+                    cli_instance = CLIFileTools(cli=ObsidianCLI(cli_binary))
+
+                    # Derive default vault name from OBSIDIAN_CONFIG_PATH
+                    # e.g. ".../my-vault/.obsidian/plugins/..." → "my-vault"
+                    config_path_str = os.environ.get("OBSIDIAN_CONFIG_PATH", "")
+                    if config_path_str:
+                        parts = config_path_str.replace("\\", "/").split("/")
+                        obs_idx = next((i for i, p in enumerate(parts) if p == ".obsidian"), -1)
+                        if obs_idx > 0:
+                            cli_instance._default_vault = parts[obs_idx - 1]
+                            logger.info(f"[CLI] Default vault: {cli_instance._default_vault}")
+
+                    self.file_tools = cli_instance
+                    websocket_success = True  # Treat CLI as successful "connection"
+                else:
+                    logger.warning("[CLI] useCliFileTools=true but Obsidian CLI binary not found. Falling back to WebSocket.")
+                    _use_cli = False
+
+            if not _use_cli:
+                # Always start with WebSocket discovery to determine process role quickly
+                websocket_success = await self._discover_or_start_websocket_server_with_autolaunch(ws_config, obsidian_config)
 
             # Check if we're in RPC mode (Process 2) - if so, skip expensive initialization
             if self.megamem_client == "RPC_MODE":

@@ -68,10 +68,12 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 
 | Component    | Minimum Version             | Recommended   |
 | ------------ | --------------------------- | ------------- |
-| **Obsidian** | 1.10.1+                     | Latest stable |
+| **Obsidian** | 1.12.4+ (installer)         | Latest stable |
 | **Node.js**  | 18.0+                       | 20.0+         |
 | **Python**   | 3.11+                       | 3.11+         |
 | **Database** | Neo4j 5.0+ or FalkorDB 1.0+ | Latest stable |
+
+> **⚠️ Obsidian Installer Required:** Obsidian 1.12.4+ must be installed via the **installer from [obsidian.md/download](https://obsidian.md/download)** — Obsidian's in-app auto-update does NOT update the installer and will not enable CLI support.
 
 ## Architecture Overview
 

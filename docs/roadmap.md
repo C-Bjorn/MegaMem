@@ -22,7 +22,8 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 
 *   **Core Plugin Foundation**: Implemented an Obsidian plugin using TypeScript/Svelte, featuring automatic schema discovery by scanning vault patterns and removing manual YAML configuration.
 *   **Multi-Database Support**: Achieved compatibility with Neo4j and FalkorDB, offering 18 distinct configurations combining various LLM and embedding provider setups.
-*   **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 8 Graphiti tools for direct graph interaction and 5 Obsidian WebSocket tools for file management.
+*   **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 10 Graphiti tools for direct graph interaction and 9 Obsidian file management tools.
+*   **Obsidian CLI Integration**: Migrated all 9 Obsidian file operation tools from a fragile WebSocket layer to stateless Obsidian CLI subprocess calls (v1.12+). Eliminates startup connection races, ERR_CONNECTION_RESET errors, and WebSocket contention between multiple MCP clients. Multi-vault targeting is a single `vault=` parameter — no persistent registry or heartbeat required.
 *   **Custom Ontology Integration**: Enabled custom ontology support with full Pydantic model generation, enhancing flexible data modeling.
 *   **FalkorDB Integration**: Successfully integrated FalkorDB, thoroughly resolving RediSearch compatibility challenges.
 *   **Advanced Sync Functionality**: Developed a sophisticated sync mechanism supporting temporal knowledge graphs and robust bidirectional synchronization with path-independent tracking (mmuids).

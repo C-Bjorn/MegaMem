@@ -307,14 +307,21 @@ Configure how knowledge is organized in the graph database.
 
 ## Servers
 
-WebSocket and MCP server configuration.
+MCP server and connection configuration.
+
+### Obsidian CLI File Tools (Recommended) <i data-lucide="check-circle"></i>
+- Description: Use the Obsidian CLI (v1.12.4+) for all file operations instead of the WebSocket connection layer. **Recommended for all users.** Eliminates startup connection errors, retry loops, and WebSocket contention between multiple MCP clients.
+- Developer Note: When enabled, MCP file tools call `obsidian <command>` as stateless subprocesses. Requires Obsidian 1.12.4+ installer and CLI registered in PATH. Disable to fall back to WebSocket mode.
+
+#### Actions:
+- **Verify CLI** <i data-lucide="terminal"></i>: Run `obsidian version` to confirm the CLI binary is accessible on PATH
 
 ### WebSocket Port <i data-lucide="check-circle"></i>
-- Description: Port number for the shared WebSocket server (configured via MCP)
-- Developer Note: Managed automatically by MCP processes.
+- Description: Port number for the shared WebSocket server. Only used when "Obsidian CLI File Tools" is disabled.
+- Developer Note: Managed automatically by MCP processes. Not needed when CLI mode is active.
 
 ### Authentication Token <i data-lucide="check-circle"></i>
-- Description: Authentication token for secure WebSocket connections (managed by MCP)
+- Description: Authentication token for secure WebSocket connections. Only used when "Obsidian CLI File Tools" is disabled.
 - Developer Note: Auto-generated secure token for WebSocket authentication.
 
 #### Actions:

@@ -4,7 +4,7 @@ date_updated: 2025-09-28T11:36
 ---
 # MCP Commands Reference
 
-This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian WebSocket File Operations. Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -149,7 +149,9 @@ List all available group IDs (namespaces) in the vault (aliases: mm, megamem, me
 
 **Parameters:** None
 
-## Obsidian WebSocket File Operations
+## Obsidian File Operations (via Obsidian CLI)
+
+> **ℹ️ Architecture Note:** These 9 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.
 
 ### `search_obsidian_notes`
 
@@ -166,7 +168,7 @@ Search for notes in Obsidian vault by filename and/or content (aliases: mv, my v
 | `path` | `string` | Scopes results to this folder path — only notes within this path are returned | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
 
-**Filename search behavior:** Uses 3-tier fuzzy matching: (1) Obsidian's `prepareFuzzySearch` for approximate matches, (2) word-subsequence fallback for reordered words and misspellings. Reordered words and approximate spellings are supported.
+**Filename search behavior (`search_mode=filename`):** Splits query into words; a file matches if **all words** appear anywhere in the basename or full path (order-independent, case-insensitive). Handles multi-word queries, dotted note names (e.g. `Day45.01`), and missing punctuation gracefully. Results return `matchType: "filename"`.
 
 ### `read_obsidian_note`
 
@@ -292,13 +294,13 @@ Manage folders in Obsidian vault - create, rename/move, or delete folders (alias
 
 ### `manage_obsidian_notes`
 
-Delete or rename notes in Obsidian vault (aliases: mv, my vault, obsidian)
+Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `operation` | `string` | The operation to perform on the note | Yes | |
-| `path` | `string` | The note path for delete operation, or the old path for rename | Yes | |
-| `newPath` | `string` | The new note path (required only for rename operation) | No | |
+| `operation` | `string` | The operation to perform on the note (`rename`, `delete`) | Yes | |
+| `path` | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md` | Yes | |
+| `newPath` | `string` | The new note path (required only for rename operation). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No | |
 | `vault_id` | `string` | Optional vault ID to target specific vault | No | |

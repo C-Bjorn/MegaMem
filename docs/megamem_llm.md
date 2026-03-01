@@ -67,10 +67,12 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 
 | Component    | Minimum Version             | Recommended   |
 | ------------ | --------------------------- | ------------- |
-| **Obsidian** | 1.10.1+                     | Latest stable |
+| **Obsidian** | 1.12.4+ (installer)         | Latest stable |
 | **Node.js**  | 18.0+                       | 20.0+         |
 | **Python**   | 3.11+                       | 3.11+         |
 | **Database** | Neo4j 5.0+ or FalkorDB 1.0+ | Latest stable |
+
+> **⚠️ Obsidian Installer Required:** Obsidian 1.12.4+ must be installed via the **installer from [obsidian.md/download](https://obsidian.md/download)** — Obsidian's in-app auto-update does NOT update the installer and will not enable CLI support.
 
 ## Architecture Overview
 
@@ -724,7 +726,7 @@ Additional settings that appear based on your provider selection:
 
 # MCP Commands Reference
 
-This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian WebSocket File Operations. Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -865,7 +867,9 @@ List all available group IDs (namespaces) in the vault (aliases: mm, megamem, me
 
 **Parameters:** None
 
-## Obsidian WebSocket File Operations
+## Obsidian File Operations (via Obsidian CLI)
+
+> **ℹ️ Architecture Note:** These 9 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](#quick-start-guide) for setup.
 
 ### `search_obsidian_notes`
 
@@ -1005,15 +1009,15 @@ Manage folders in Obsidian vault - create, rename/move, or delete folders (alias
 
 ### `manage_obsidian_notes`
 
-Delete or rename notes in Obsidian vault (aliases: mv, my vault, obsidian)
+Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
 | Name        | Type     | Description                                                    | Required | Default |
 | ----------- | -------- | -------------------------------------------------------------- | -------- | ------- |
-| `operation` | `string` | The operation to perform on the note                           | Yes      |         |
-| `path`      | `string` | The note path for delete operation, or the old path for rename | Yes      |         |
-| `newPath`   | `string` | The new note path (required only for rename operation)         | No       |         |
+| `operation` | `string` | The operation to perform on the note (`rename`, `delete`)     | Yes      |         |
+| `path`      | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md` | Yes      |         |
+| `newPath`   | `string` | The new note path (required only for rename). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No       |         |
 | `vault_id`  | `string` | Optional vault ID to target specific vault                     | No       |         |
 
 ---
@@ -1412,7 +1416,8 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 
 - **Core Plugin Foundation**: Implemented an Obsidian plugin using TypeScript/Svelte, featuring automatic schema discovery by scanning vault patterns and removing manual YAML configuration.
 - **Multi-Database Support**: Achieved compatibility with Neo4j and FalkorDB, offering 18 distinct configurations combining various LLM and embedding provider setups.
-- **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 8 Graphiti tools for direct graph interaction and 5 Obsidian WebSocket tools for file management.
+- **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 10 Graphiti tools for direct graph interaction and 9 Obsidian file management tools.
+- **Obsidian CLI Integration**: Migrated all 9 Obsidian file operation tools from a fragile WebSocket layer to stateless Obsidian CLI subprocess calls (v1.12+). Eliminates startup connection races, ERR_CONNECTION_RESET errors, and WebSocket contention between multiple MCP clients. Multi-vault targeting is a single `vault=` parameter — no persistent registry or heartbeat required.
 - **Custom Ontology Integration**: Enabled custom ontology support with full Pydantic model generation, enhancing flexible data modeling.
 - **FalkorDB Integration**: Successfully integrated FalkorDB, thoroughly resolving RediSearch compatibility challenges.
 - **Advanced Sync Functionality**: Developed a sophisticated sync mechanism supporting temporal knowledge graphs and robust bidirectional synchronization with path-independent tracking (mmuids).

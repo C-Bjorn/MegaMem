@@ -40,12 +40,33 @@ Get MegaMem running in your Obsidian vault in under 5 minutes with this streamli
    - Go to `Settings` → `Community plugins`
    - Enable "MegaMem MCP"
 
-## ⚡ 6-Step Setup
+## ⚡ 7-Step Setup
+
+### Step 0: Register Obsidian CLI *(Required for MCP file tools)*
+
+MegaMem's MCP server uses the **Obsidian CLI** (native since Obsidian 1.12) to read, write, and search vault files without a persistent WebSocket connection. Follow these steps before anything else:
+
+1. **Download and run the Obsidian 1.12.4+ installer** from [obsidian.md/download](https://obsidian.md/download)
+   > ⚠️ **In-app auto-update is NOT sufficient** — it updates the app version but not the installer. You must run the full installer to get the CLI binary.
+
+2. **Enable CLI in Obsidian Settings**
+   - Open Obsidian → `Settings` → `General`
+   - Find the **"Command line interface"** section and toggle it on
+   - Click **"Register"** to add `obsidian` to your system PATH
+
+3. **Restart your terminal** (PATH changes only apply to new terminal sessions)
+
+4. **Verify** by running `obsidian version` in a terminal — you should see a version string.
+   - *Windows note:* The CLI uses `Obsidian.com` (a terminal redirector) installed alongside `Obsidian.exe`. This ships with the 1.12.4+ installer automatically.
+
+> **Tip:** In MegaMem Plugin Settings → Servers, use the **"Verify CLI"** button to confirm the CLI is accessible without opening a terminal.
+
+---
 
 ### Step 1: Database Setup
 Setup your preferred database (Neo4j or FalkorDB - see [Database Setup](guides/database-setup.md) for details). **Kuzu & Amazon Neptune coming soon**
 
-### Step 2: LLM Configuration  
+### Step 2: LLM Configuration
 In Plugin Settings, add your LLM keys and configuration (select "Load Defaults" to start)
 
 ### Step 3: Database Configuration
@@ -79,8 +100,10 @@ For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-
 
 ## ✅ Verification Checklist
 
+- [ ] Obsidian 1.12.4+ installer run and CLI registered in PATH
+- [ ] `obsidian version` returns a version string in terminal
 - [ ] Database connection successful
-- [ ] LLM provider responding correctly  
+- [ ] LLM provider responding correctly
 - [ ] Python dependencies installed
 - [ ] Plugin enabled and configured
 - [ ] Claude Desktop MCP connection active
