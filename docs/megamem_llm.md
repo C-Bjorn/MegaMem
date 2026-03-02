@@ -271,6 +271,44 @@ Configure API keys for various AI service providers.
 
 - **Validate API Keys** <i data-lucide="shield-check"></i>: Validates all configured API keys without testing models
 
+## Model Library <i data-lucide="check-circle"></i>
+
+Fetch and browse live model catalogs from your configured LLM providers. Curate a personal short-list — only short-listed models appear in LLM Configuration dropdowns.
+
+### How it works
+
+1. **Fetch All Models** — queries each configured provider's API simultaneously
+2. **Browse** — scroll through models with metadata (context window, pricing, capabilities)
+3. **Toggle** — check models on to add them to your short-list
+4. Model cache is stored in `model-library-cache.json` (separate from main settings) and refreshed every 24 hours
+
+### Capability Filters (OpenRouter)
+
+When OpenRouter is selected, a capability filter bar appears above the model list:
+
+| Filter | Description |
+|--------|-------------|
+| 🟢 **Graphiti Compatible** | Supports `structured_outputs` **and** `temperature` — works with Graphiti's knowledge extraction pipeline. **Use this filter when selecting models for sync.** |
+| Structured Outputs | Supports `json_schema` format |
+| Tool Use | Supports function calling |
+| Vision | Accepts image inputs |
+| ZDR | Zero Data Retention |
+
+> **Why not just filter by Structured Outputs?** Some models (GPT-5, o1, o3 families) report `structured_outputs` support but reject the `temperature` parameter. Graphiti's pipeline always sends `temperature`, so these models will fail with a 404 routing error from OpenRouter. The **🟢 Graphiti Compatible** filter correctly excludes them.
+
+### Recommended OpenRouter Models (tested with Graphiti)
+
+| Model | Notes |
+|-------|-------|
+| `openai/gpt-4.1` | ⭐ Recommended — best balance of capability and reliability |
+| `openai/gpt-4.1-mini` | Best cost/performance ratio |
+| `openai/gpt-4o` | Legacy, still works |
+| `anthropic/claude-sonnet-4-5-20250929` | Works via OpenRouter |
+| `anthropic/claude-sonnet-4-6` | Works via OpenRouter ✅ |
+| `google/gemini-2.5-flash` | Works via OpenRouter |
+
+> **Do NOT use** `openai/gpt-5`, `openai/gpt-5-mini`, `openai/o1`, `openai/o3` via OpenRouter — they reject the `temperature` parameter required by Graphiti (GitHub issue [#878](https://github.com/getzep/graphiti/issues/878)).
+
 ## LLM Configuration
 
 Configure language model providers and specific models.

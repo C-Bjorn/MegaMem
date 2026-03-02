@@ -50,6 +50,41 @@ Configure API keys for various AI service providers.
 #### Actions:
 - **Validate API Keys** <i data-lucide="shield-check"></i>: Validates all configured API keys without testing models
 
+## Model Library <i data-lucide="check-circle"></i>
+
+Fetch and manage available models from your configured LLM providers. Appears between API Keys and LLM Configuration.
+
+- **Purpose**: Discover models available from each provider's API, curate a personal short-list, and control which models appear in LLM Configuration dropdowns.
+- **Developer Note**: Fetched model data is cached in `model-library-cache.json` (separate from `data.json` for performance). Cache TTL is 24 hours.
+
+### Fetch All Models
+#### Actions:
+- **Fetch All Models** <i data-lucide="download"></i>: Queries all configured providers simultaneously for their current model catalog
+- **Clear Cache** <i data-lucide="trash"></i>: Clears the model library cache — next fetch will pull fresh data
+
+### LLM Models / Embedding Models
+
+For each section, select a provider and click **Fetch** to load its model list.
+
+**Capability Filters (OpenRouter only):**
+
+| Filter | Meaning |
+|--------|---------|
+| 🟢 Graphiti Compatible | Model supports both `structured_outputs` AND `temperature` — works reliably with Graphiti's knowledge extraction pipeline |
+| Structured Outputs | Supports `json_schema` response format |
+| Tool Use | Supports function calling |
+| Vision | Accepts image inputs |
+| ZDR | Zero Data Retention — provider does not use your data for training |
+
+> **Important for OpenRouter users**: Always filter by **🟢 Graphiti Compatible** when selecting models for sync. GPT-5/o1/o3 models support structured outputs but reject the `temperature` parameter, causing 404 routing errors with Graphiti's extraction pipeline.
+
+**Model Row Controls:**
+- **Checkbox**: Toggle model on/off in your short-list. Enabled models appear in LLM Configuration dropdowns.
+- **★ badge**: Recommended by MegaMem (from built-in defaults)
+- **Metadata badges**: Context window (e.g. `128K`), dimensions for embeddings, pricing (`$/1M` tokens)
+
+> **Note**: When 11 or more models are in your short-list, the LLM Model selector switches from a dropdown to a searchable text input with keyboard autocomplete (↑↓ Enter Esc).
+
 ## LLM Configuration
 
 Configure language model providers and specific models.
@@ -65,7 +100,7 @@ Configure language model providers and specific models.
 
 ### LLM Model <i data-lucide="check-circle"></i>
 - Description: Primary language model for processing
-- Developer Note: Dynamic model loading from provider-specific defaults. Supports custom models for Ollama.
+- Developer Note: Dynamic model loading from provider-specific defaults. When 11+ models are in your Model Library short-list, this becomes a searchable text input with autocomplete. Supports custom models for Ollama.
 
 ### LLM Model Small <i data-lucide="check-circle"></i>
 - Description: Smaller, faster model for re-ranking operations (optional)
