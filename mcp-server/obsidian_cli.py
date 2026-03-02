@@ -544,11 +544,13 @@ class ObsidianCLI:
                     return self._err(out or f"Move failed: {path} -> {dst_folder}")
                 if name_changed:
                     # Name also changed — rename at new location
+                    # Always pass name with .md — CLI uses a "has-dot" heuristic that
+                    # treats dotted stems like "Day46.01 - Foo" as already having an extension
                     moved_path = f"{dst_folder}/{os.path.basename(path)}" if dst_folder else os.path.basename(path)
-                    out, code = self._run(vault, "rename", f"path={moved_path}", f"name={dst_name}")
+                    out, code = self._run(vault, "rename", f"path={moved_path}", f"name={dst_name}.md")
             else:
                 # Same folder, filename-only rename
-                out, code = self._run(vault, "rename", f"path={path}", f"name={dst_name}")
+                out, code = self._run(vault, "rename", f"path={path}", f"name={dst_name}.md")
 
         elif operation == "delete":
             out, code = self._run(vault, "delete", f"path={path}")

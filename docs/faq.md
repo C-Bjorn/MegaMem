@@ -19,3 +19,13 @@ The Model Context Protocol (MCP) allows AI assistants, like Claude Desktop, to a
 <summary>What databases does MegaMem support?</summary>
 Currently, MegaMem supports Neo4j and FalkorDB. Support for Kuzu and Amazon Neptune is planned for future releases.
 </details>
+
+<details>
+<summary>Do I need to manually download Python files after installing via BRAT?</summary>
+No. As of v1.3.2, MegaMem automatically detects missing Python components and offers to download them on first launch. When you install via BRAT, a dialog will appear after ~3 seconds asking you to install the Python components. Click "Install / Update Components" to complete the setup automatically.
+</details>
+
+<details>
+<summary>How do I update MegaMem's Python components?</summary>
+Go to <strong>Settings → MegaMem → Updates</strong> (scroll to the bottom) and click "Check for Updates". The plugin will check GitHub for the latest release and prompt you to update if needed. Updates are also checked automatically when the plugin loads.
+</details>

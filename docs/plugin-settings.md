@@ -431,6 +431,20 @@ Plugin configuration management.
 - **Import Settings** <i data-lucide="upload"></i>: Import settings from a file
 - **Reset to Defaults** <i data-lucide="rotate-ccw"></i>: Reset all settings to their default values
 
+## Updates
+
+Located at the bottom of MegaMem settings.
+
+### Check for Updates
+Manually check for plugin and Python component updates from GitHub. The plugin also performs this check automatically 3 seconds after loading.
+
+- If Python components (`graphiti_bridge` or `mcp-server`) are missing or outdated, an install dialog will appear
+- Click **Install / Update Components** to download and install the latest `python-components.zip` from GitHub releases
+- If everything is current, you'll see: "MegaMem is up to date!"
+
+#### Actions:
+- **Check for Updates** <i data-lucide="refresh-cw"></i>: Fetch the latest release from GitHub and compare against installed component versions
+
 ## Development Options
 
 Experimental features and development tools.

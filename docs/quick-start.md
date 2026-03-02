@@ -28,7 +28,21 @@ Get MegaMem running in your Obsidian vault in under 5 minutes with this streamli
    - Click `Browse` and search for "MegaMem"
    - Click `Install` → `Enable`
 
-### Method 2: Manual Installation
+### Method 2: BRAT (Beta Reviewers and Auto-update Tool)
+
+1. **Install BRAT** from Community Plugins if you haven't already
+
+2. **Add MegaMem via BRAT**
+   - Open BRAT settings → `Add Beta Plugin`
+   - Enter: `C-Bjorn/megamem-mcp`
+   - Click `Add Plugin`
+
+3. **Python Components Install Automatically**
+   - After ~3 seconds, a dialog will appear: **"Install / Update Components"**
+   - Click the button — MegaMem downloads and installs `graphiti_bridge` and `mcp-server` automatically
+   - No manual file downloads required
+
+### Method 3: Manual Installation
 
 1. **Download Latest Release**
    - Visit https://github.com/C-Bjorn/megamem-mcp/releases
