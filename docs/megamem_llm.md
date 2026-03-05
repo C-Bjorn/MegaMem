@@ -1156,7 +1156,7 @@ The Ontology Manager is divided into four main tabs:
 
 - **Entity Types**: Manage the different types of entities (e.g., Person, Project, Concept) discovered in your vault.
 - **Properties**: Configure the attributes associated with each entity type.
-- **Edge Types**: Define the types of relationships that can exist between entities (e.g., WorksFor, Uses).
+- **Edge Types**: Define the types of relationships that can exist between entities (e.g., `WORKS_FOR`, `USES`).
 - **Edge Mappings**: Specify which entity types can be connected by which edge types.
 
 Each section offers tools for defining schema elements, editing descriptions, and interacting with default or LLM-suggested configurations.
@@ -1174,7 +1174,7 @@ This section provides tools for leveraging Language Models to automatically gene
   - **Skip User Defined**: Only generate descriptions for entities without user-defined descriptions.
   - **New Only**: Generate descriptions only for newly discovered entity types.
 - **Suggest Property Descriptions**: Enables AI to suggest property definitions using the same filter modes.
-- **Generate Complete Ontology**: Automatically generates a comprehensive schema including entities, properties, edge types, and mappings.
+- **Generate Complete Ontology**: Batched LLM generation for **enabled entity types only** — entities, edge types (SCREAMING_SNAKE_CASE), and mappings. Constrained by `maxTotalEdgeTypes` cap (default: 25) with reuse-first prompting and a post-generation consolidation pass to merge semantic duplicates.
 - **Load All Default Entity Descriptions**: Populates descriptions for all discovered entity types using predefined defaults, if available.
 
 #### Graphiti Compliance Dashboard
@@ -1229,7 +1229,7 @@ An expandable list of all discovered entity types, each showing its properties.
 - **Property Details**: For each property:
   - **Enable/Disable Checkbox**: Includes or excludes the property from Pydantic model generation. Protected or globally ignored properties cannot be changed.
   - **Property Mapping Indicator**: Shows if a property name has been mapped (e.g., from `MyProperty` to `my_property`).
-  - **Property Defined**: Toggles whether the property's description is stored in `data.json`.
+  - **Property Defined**: Toggles whether the property's description is stored in `ontology.json`.
   - **Status Indicator**: Shows if a property is `PROTECTED` (system-reserved), `IGNORED` (globally), has `NAMING` issues, is `ENABLED`, or `DISABLED`.
   - **Description Input**: Edit the property's description. Can "Load Default" or use "LLM Suggest" with confirmation modal.
   - **Validation Warnings**: Alerts for protected attributes, globally ignored fields, and naming suggestions, with options to apply suggestions.
@@ -1244,7 +1244,7 @@ Manage the different kinds of relationships between entities.
 - **Edit Description**: Modify the description of a custom edge type.
 - **Delete Edge Type**: Remove a custom edge type.
 - **Add Property**: Add custom properties (name, type, description, required status) to an edge type.
-- **Quick Add Common Types**: Pre-fills common relationship types like `WorksFor`, `Uses`, `Creates`, `MemberOf`, `Manages`, `Contains`.
+- **Quick Add Common Types**: Pre-fills common relationship types: `WORKS_FOR`, `USES`, `CREATES`, `MEMBER_OF`, `MANAGES`, `CONTAINS`.
 - **Add New Edge Type**: Manually add a new custom edge type with a name and description.
 - **LLM Suggest Edge Types**: AI-generated suggestions for edge type descriptions based on your vault content.
 
@@ -1263,7 +1263,7 @@ This section allows you to rigorously define permissible relationships between d
 - **Mapping List**: Displays existing mappings (e.g., `Person` → `Project` via `WorksOn` or `Manages`).
 - **Edit Mapping**: Modify the source entity, target entity, and allowed edge types for an existing mapping.
 - **Delete Mapping**: Remove a custom edge mapping.
-- **Quick Add Common Mappings**: Pre-fills common mappings like `Person` → `Technology` (Uses, RelatesTo) or `Entity` → `Entity` (RelatesTo).
+- **Quick Add Common Mappings**: Pre-fills common mappings like `Person` → `Technology` (`USES`, `CREATES`) or `Entity` → `Entity` (`RELATED_TO`). All `allowedEdges` values are SCREAMING_SNAKE_CASE.
 - **Add New Edge Mapping**: Manually create a new mapping by selecting a source entity, target entity, and allowed edge types.
 
 ### Suggested Edge Mappings
@@ -1452,6 +1452,10 @@ This document provides a concise overview of the MegaMem project's evolution, hi
 
 MegaMem has successfully established a robust foundation, delivering powerful integration between Obsidian and advanced knowledge graph capabilities:
 
+- **Ontology File Separation**: Extracted all ontology data from `data.json` into a dedicated `ontology.json` file co-located in the plugin directory. Reduces `data.json` from ~120KB to a lean runtime config file (~20KB). Existing installations auto-migrate on first plugin load — no manual action required.
+- **SCREAMING_SNAKE_CASE Edge Normalization**: Aligned all edge type naming with Graphiti's native convention. All ontology `allowedEdges` definitions and prompt examples updated. 796 historical PascalCase edges in production Neo4j migrated to SCREAMING_SNAKE_CASE.
+- **Constrained Ontology Generation Pipeline**: Redesigned `Generate Complete Ontology` with reuse-first batch prompts, `maxTotalEdgeTypes` cap (default: 25), and post-generation consolidation pass to prevent edge type proliferation.
+- **Schema Manager Cleanup Buttons**: Added 🗑️ Cleanup modals to all four Ontology Manager tabs for removing stale schema entries.
 - **Core Plugin Foundation**: Implemented an Obsidian plugin using TypeScript/Svelte, featuring automatic schema discovery by scanning vault patterns and removing manual YAML configuration.
 - **Multi-Database Support**: Achieved compatibility with Neo4j and FalkorDB, offering 18 distinct configurations combining various LLM and embedding provider setups.
 - **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 10 Graphiti tools for direct graph interaction and 9 Obsidian file management tools.
@@ -1467,10 +1471,11 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 Our focus remains on expanding MegaMem's capabilities while maintaining simplicity and performance:
 
 - **Production Release**: Prepare for a public GitHub release (versioning per Obsidian guidelines, PR processes) and submission to the Obsidian community plugin repository.
-- **Enhanced LLM Integration**: Explore features such as automatic ontology generation and a built-in chat interface for more interactive AI experiences.
+- **Optimized Edge Type Generation**: Research quality-ranking for LLM-generated edge types, auto-pruning of zero-occurrence edges after sync, and a curated core + domain expansion pack model.
 - **Revenue Models**: Investigate "Pro" features and provide rich vault templates.
 - **Infrastructure**: Prioritize making core sync reliable and schema management intuitive as prerequisites for advanced features like graph visualization.
 - **Advanced Sync Features**: Implement "Sync on Save" and configurable scheduled sync intervals, building on the current sequential sync architecture.
 - **Graph Visualization**: Evaluate and integrate suitable libraries (e.g., d3.js, three.js, cytoscape) to provide an interactive graph view of user knowledge.
+- **Built-in LLM Chat Interface**: Explore a native chat interface within Obsidian for direct knowledge graph interaction.
 
 We are committed to continuous improvement and agile development. Specific timelines will be announced as features progress.

@@ -142,7 +142,8 @@ class ObsidianMegaMemMCPServer:
         self.initialization_complete = False
         self.resource_loading_task = None
         self.ready_event = asyncio.Event()
-        
+        self.embedder_healthy = True  # Set False if embedder health check fails at startup
+
         # @purpose: Episode queuing to prevent race conditions @depends: asyncio.Queue @results: Sequential episode processing per group_id
         self.episode_queues: Dict[str, asyncio.Queue] = {}
         self.queue_workers: Dict[str, bool] = {}
@@ -285,7 +286,8 @@ class ObsidianMegaMemMCPServer:
                     "type": "object",
                     "properties": {
                         "entity_name": {"type": "string", "description": "Entity name"},
-                        "edge_type": {"type": "string", "description": "Edge type (optional)"}
+                        "edge_type": {"type": "string", "description": "Edge type (optional)"},
+                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to scope the search (prevents cross-group data leakage)"}
                     },
                     "required": ["entity_name"]
                 }
@@ -684,6 +686,16 @@ WORKFLOW:
                     })
                 )]
 
+        # @purpose: Gate search/edge tools when embedder is unreachable @depends: embedder_healthy @results: Clear error instead of raw APIConnectionError
+        _EMBEDDER_REQUIRED = {"search_memory_nodes", "search_memory_facts", "get_entity_edge"}
+        if name in _EMBEDDER_REQUIRED and not self.embedder_healthy:
+            provider = self.bridge_config.embedder_provider if self.bridge_config else 'ollama'
+            if provider == 'ollama':
+                msg = "Embedder unreachable: Ollama is not running (start with: ollama serve)"
+            else:
+                msg = f"Embedder unreachable ({provider}): start the embedder service before using search tools"
+            return [types.TextContent(type="text", text=json.dumps({"success": False, "error": msg}))]
+
         try:
             if name == "add_memory":
                 group_id_str = arguments.get("group_id") or self.bridge_config.default_namespace
@@ -864,7 +876,6 @@ WORKFLOW:
                 }))]
 
             elif name == "get_entity_edge":
-                # Search for episodes/nodes that mention the entity and return their edges
                 try:
                     entity_name = arguments.get("entity_name")
                     if not entity_name:
@@ -873,40 +884,40 @@ WORKFLOW:
                             "error": "entity_name is required"
                         }))]
                     edge_type = arguments.get("edge_type")
-
-                    # Search for nodes related to the entity
-                    search_results = await self.megamem_client.search(entity_name)
-
-                    if not search_results:
-                        return [types.TextContent(type="text", text=json.dumps({
-                            "success": True,
-                            "entity": entity_name,
-                            "edges": [],
-                            "message": f"No edges found for entity: {entity_name}"
-                        }))]
-
-                    # Extract edge information from search results
+                    group_ids = arguments.get("group_ids")
                     edges = []
-                    for result in search_results:
-                        # Get the values
-                        valid_at_val = getattr(result, 'valid_at', '')
-                        invalid_at_val = getattr(result, 'invalid_at', '')
 
-                        # Create the dictionary, converting datetimes to strings
-                        edge_info = {
-                            "uuid": str(result.uuid),
-                            "fact": getattr(result, 'fact', ''),
-                            "source_node_uuid": getattr(result, 'source_node_uuid', ''),
-                            "target_node_uuid": getattr(result, 'target_node_uuid', ''),
-                            "valid_at": valid_at_val.isoformat() if isinstance(valid_at_val, datetime) else valid_at_val,
-                            "invalid_at": invalid_at_val.isoformat() if isinstance(invalid_at_val, datetime) else invalid_at_val
-                        }
-
-                        # Filter by edge type if specified
-                        if edge_type and edge_type.lower() not in edge_info["fact"].lower():
-                            continue
-
-                        edges.append(edge_info)
+                    if group_ids:
+                        # Scoped search — use _search with group_ids to prevent cross-group leakage
+                        search_config = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+                        search_config.limit = 25
+                        results = await self.megamem_client._search(
+                            query=entity_name,
+                            config=search_config,
+                            group_ids=group_ids
+                        )
+                        for result in results.edges:
+                            edge_info = self._format_fact_result(result)
+                            if edge_type and edge_type.lower() not in edge_info.get("fact", "").lower():
+                                continue
+                            edges.append(edge_info)
+                    else:
+                        # Unscoped — backward-compatible, searches all groups
+                        search_results = await self.megamem_client.search(entity_name)
+                        for result in (search_results or []):
+                            valid_at_val = getattr(result, 'valid_at', '')
+                            invalid_at_val = getattr(result, 'invalid_at', '')
+                            edge_info = {
+                                "uuid": str(result.uuid),
+                                "fact": getattr(result, 'fact', ''),
+                                "source_node_uuid": str(getattr(result, 'source_node_uuid', '')),
+                                "target_node_uuid": str(getattr(result, 'target_node_uuid', '')),
+                                "valid_at": valid_at_val.isoformat() if isinstance(valid_at_val, datetime) else valid_at_val,
+                                "invalid_at": invalid_at_val.isoformat() if isinstance(invalid_at_val, datetime) else invalid_at_val
+                            }
+                            if edge_type and edge_type.lower() not in edge_info["fact"].lower():
+                                continue
+                            edges.append(edge_info)
 
                     return [types.TextContent(type="text", text=json.dumps({
                         "success": True,
@@ -1080,6 +1091,12 @@ WORKFLOW:
                 }))]
 
         except Exception as e:
+            embedder_provider = self.bridge_config.embedder_provider if self.bridge_config else ''
+            if 'APIConnectionError' in type(e).__name__ and embedder_provider == 'ollama':
+                friendly_msg = "Embedder unreachable: Ollama is not running (start with: ollama serve)"
+                logger.error(f"[EMBEDDER ERROR] {friendly_msg}")
+                self.embedder_healthy = False
+                return [types.TextContent(type="text", text=json.dumps({"success": False, "error": friendly_msg}))]
             logger.error(f"MegaMem tool error: {e}", exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({
                 "success": False,
@@ -1311,6 +1328,27 @@ WORKFLOW:
             if not megamem_client:
                 raise ValueError("MegaMem client initialization failed (returned None).")
             self.megamem_client = megamem_client
+
+            # @purpose: Embedder health check @depends: megamem_client @results: Clear startup log if Ollama/embedder unreachable
+            try:
+                hc_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+                hc_config.limit = 1
+                await self.megamem_client._search(
+                    query="health",
+                    config=hc_config,
+                    group_ids=[bridge_config.default_namespace]
+                )
+                logger.info("[BACKGROUND] Embedder health check passed")
+            except Exception as embed_err:
+                self.embedder_healthy = False
+                if bridge_config.embedder_provider == 'ollama':
+                    base_url = bridge_config.ollama_base_url or 'http://localhost:11434'
+                    logger.error(
+                        f"[EMBEDDER ERROR] Ollama is not running or unreachable at {base_url}. "
+                        "Start Ollama before using graph search tools. Run: ollama serve"
+                    )
+                else:
+                    logger.error(f"[EMBEDDER ERROR] Embedder unreachable ({bridge_config.embedder_provider}): {embed_err}")
 
             # Initialize DB constraints after graphiti client is ready
             logger.info("[BACKGROUND] Building database indices...")

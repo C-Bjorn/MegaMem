@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field, create_model
 
 
 class DynamicModelLoader:
-    """Dynamically generates Pydantic models from enhanced data.json schema data"""
+    """Dynamically generates Pydantic models from enhanced schema data.
+    Reads ontology from ontology.json (with fallback to data.json for pre-migration installs)"""
 
     def __init__(self, vault_path: str):
         self.vault_path = Path(vault_path)
@@ -37,6 +38,8 @@ class DynamicModelLoader:
                 self.data_json_path = primary
             else:
                 self.data_json_path = fallback
+        # Derive ontology.json path — same directory as data.json
+        self.ontology_json_path = self.data_json_path.parent / 'ontology.json'
         self.entity_types: Dict[str, Type] = {}
         self.edge_types: Dict[str, Type] = {}
         self.entity_type_definitions: Dict[str, Any] = {}
@@ -59,24 +62,32 @@ class DynamicModelLoader:
                     f"Data.json not found: {self.data_json_path}")
                 return False
 
-            # Load schema data from data.json
-            with open(self.data_json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            # Load ontology data — prefer ontology.json, fall back to data.json
+            if self.ontology_json_path.exists():
+                with open(self.ontology_json_path, 'r', encoding='utf-8') as f:
+                    ontology_data = json.load(f)
+                self.logger.info(f"Loaded ontology from ontology.json: {self.ontology_json_path}")
+            else:
+                # Backward compat: ontology still in data.json (pre-migration install)
+                with open(self.data_json_path, 'r', encoding='utf-8') as f:
+                    ontology_data = json.load(f)
+                self.logger.info("ontology.json not found, reading ontology from data.json (pre-migration)")
 
             # Extract schema sections
-            entity_descriptions = data.get('entityDescriptions', {})
-            property_descriptions = data.get('propertyDescriptions', {})
-            edge_types_data = data.get('edgeTypes', {})
-            edge_type_map_data = data.get('edgeTypeMap', [])
+            entity_descriptions = ontology_data.get('entityDescriptions', {})
+            property_descriptions = ontology_data.get('propertyDescriptions', {})
+            edge_types_data = ontology_data.get('edgeTypes', {})
+            edge_type_map_data = ontology_data.get('edgeTypeMap', [])
+            property_selections = ontology_data.get('propertySelections', {})
 
             if not entity_descriptions and not edge_types_data:
                 self.logger.warning(
-                    "No entity or edge type data found in data.json")
+                    "No entity or edge type data found in ontology source")
                 return False
 
             # Generate entity type models
             self.entity_types = self._generate_entity_models(
-                entity_descriptions, property_descriptions)
+                entity_descriptions, property_descriptions, property_selections)
             self.entity_type_definitions = self._create_entity_type_definitions(
                 entity_descriptions, property_descriptions)
 
@@ -100,16 +111,10 @@ class DynamicModelLoader:
             return False
 
     def _generate_entity_models(self, entity_descriptions: Dict[str, Any],
-                                property_descriptions: Dict[str, Any]) -> Dict[str, Type]:
-        """Generate Pydantic models for entity types using data.json property mappings and selections"""
+                                property_descriptions: Dict[str, Any],
+                                property_selections: Dict[str, Any]) -> Dict[str, Type]:
+        """Generate Pydantic models for entity types using ontology property mappings and selections"""
         models = {}
-
-        # Load property mappings and selections from data.json
-        with open(self.data_json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        property_mappings = data.get('propertyMappings', {})
-        property_selections = data.get('propertySelections', {})
 
         # First create BaseEntity with universal properties
         base_entity_fields: Dict[str, Any] = {
@@ -141,7 +146,7 @@ class DynamicModelLoader:
                 else:
                     # Generate fields based on enabled properties and their descriptions
                     fields = self._get_entity_fields_from_data(
-                        entity_name, enabled_properties, property_descriptions, property_mappings)
+                        entity_name, enabled_properties, property_descriptions)
 
                 # Create the model inheriting from BaseEntity
                 # Extract fields safely for create_model
@@ -172,8 +177,7 @@ class DynamicModelLoader:
         return models
 
     def _get_entity_fields_from_data(self, entity_name: str, enabled_properties: List[str],
-                                     property_descriptions: Dict[str, Any],
-                                     property_mappings: Dict[str, Any]) -> Dict[str, tuple]:
+                                     property_descriptions: Dict[str, Any]) -> Dict[str, tuple]:
         """Generate entity fields based on data.json selections and mappings"""
         fields = {}
 
