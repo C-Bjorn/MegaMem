@@ -1,19 +1,23 @@
 # Contributing to MegaMem
 
-We welcome contributions to MegaMem! Your help makes our project better.
+We welcome contributions to MegaMem! Your help makes the project better.
 
 ## How to Contribute
 
-1.  **Report Bugs**: If you find a bug, please open an issue on our [GitHub Issues](https://github.com/C-Bjorn/megamem-mcp/issues) page.
-2.  **Suggest Features**: Have a great idea? Share it on [GitHub Discussions](https://github.com/C-Bjorn/megamem-mcp/discussions) or open a feature request on GitHub Issues.
-3.  **Propose Changes**:
-    - Fork the repository.
-    - Create a new branch for your changes.
-    - Make your modifications.
-    - Submit a pull request.
-4.  **Make a Contribution**: All open-source development is done in the private domain for the benefit of Earth and the Stewards of GAIA. You can support the cause and this project by [making a donation here](https://endogon.org/contribute)
+1. **Report Bugs** — Open an issue on [GitHub Issues](https://github.com/C-Bjorn/megamem-mcp/issues). Include your OS, Obsidian version, database type, and steps to reproduce.
 
+2. **Suggest Features** — Share ideas on [GitHub Discussions](https://github.com/C-Bjorn/megamem-mcp/discussions) or submit a feature request via [endogon.com/roadmap](https://endogon.com/roadmap) — you can vote on and fund roadmap items there.
+
+3. **Propose Code Changes**
+   - Fork the repository
+   - Create a new branch for your change
+   - Make your modifications
+   - Submit a pull request with a clear description of what changed and why
+
+4. **Support the Project** — All open-source development is done for the benefit of the Stewards of GAIA. You can support the cause at [endogon.org/contribute](https://endogon.org/contribute).
 
 ## Community
 
-Join our community on [Discord](https://discord.gg/your-discord-link) (coming soon) for discussions and support.
+- **[GitHub Discussions](https://github.com/C-Bjorn/megamem-mcp/discussions)** — Questions, use cases, ideas
+- **[Roadmap & Feature Funding](https://endogon.com/roadmap)** — Submit and prioritize features
+- **[GitHub Issues](https://github.com/C-Bjorn/megamem-mcp/issues)** — Bug reports

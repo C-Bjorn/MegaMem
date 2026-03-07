@@ -14,17 +14,9 @@ tags: megamem, obsidian, knowledge-graph, ai, llm, mcp, documentation
 
 # MegaMem
 
-> These docs were written in about 30min with MegaMem, sourcing over 120 development docs loaded into the graph [love GraphRAG]. **_Aside, I haven't read it all—their may be a few mistakes...that shall be corrected as time permits._**
-
 MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vault with AI-powered graph databases, creating a seamless ecosystem for knowledge discovery, semantic search, and intelligent content management. With native Claude Desktop integration and support for multiple LLM providers, MegaMem transforms how you interact with your life.
 
 ## Key Features
-
-### Bi-directional Sync
-
-- Real-time synchronization between Obsidian and graph databases
-- Maintains data integrity across platforms
-- Supports both Neo4j and FalkorDB backends
 
 ### AI-Powered Knowledge Extraction
 
@@ -133,7 +125,6 @@ Get MegaMem running in your Obsidian vault in under 5 minutes with this streamli
 ### Method 1: Community Plugins (Coming Soon!)
 
 1. **Open Obsidian Settings**
-
    - Go to `Settings` → `Community plugins`
    - Disable `Safe mode` if enabled
 
@@ -144,7 +135,6 @@ Get MegaMem running in your Obsidian vault in under 5 minutes with this streamli
 ### Method 2: Manual Installation
 
 1. **Download Latest Release**
-
    - Visit https://github.com/C-Bjorn/megamem-mcp/releases
    - Download the latest release ZIP file
    - Extract the contents to your vault's `.obsidian/plugins/megamem-mcp/` directory
@@ -187,7 +177,6 @@ For custom ontologies, set [Knowledge Namespacing](#knowledge-namespacing) setti
 ## 🤖 MCP Server Setup (for Claude Desktop and other private LLM consoles)
 
 1. **Generate MCP Configuration**
-
    - Go to Plugin Settings → Servers section
    - Click "Generate Config" button
    - Copy the generated configuration (formatted with `mcpServers` wrapper for Claude Desktop compatibility)
@@ -286,26 +275,26 @@ Fetch and browse live model catalogs from your configured LLM providers. Curate 
 
 When OpenRouter is selected, a capability filter bar appears above the model list:
 
-| Filter | Description |
-|--------|-------------|
+| Filter                     | Description                                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🟢 **Graphiti Compatible** | Supports `structured_outputs` **and** `temperature` — works with Graphiti's knowledge extraction pipeline. **Use this filter when selecting models for sync.** |
-| Structured Outputs | Supports `json_schema` format |
-| Tool Use | Supports function calling |
-| Vision | Accepts image inputs |
-| ZDR | Zero Data Retention |
+| Structured Outputs         | Supports `json_schema` format                                                                                                                                  |
+| Tool Use                   | Supports function calling                                                                                                                                      |
+| Vision                     | Accepts image inputs                                                                                                                                           |
+| ZDR                        | Zero Data Retention                                                                                                                                            |
 
 > **Why not just filter by Structured Outputs?** Some models (GPT-5, o1, o3 families) report `structured_outputs` support but reject the `temperature` parameter. Graphiti's pipeline always sends `temperature`, so these models will fail with a 404 routing error from OpenRouter. The **🟢 Graphiti Compatible** filter correctly excludes them.
 
 ### Recommended OpenRouter Models (tested with Graphiti)
 
-| Model | Notes |
-|-------|-------|
-| `openai/gpt-4.1` | ⭐ Recommended — best balance of capability and reliability |
-| `openai/gpt-4.1-mini` | Best cost/performance ratio |
-| `openai/gpt-4o` | Legacy, still works |
-| `anthropic/claude-sonnet-4-5-20250929` | Works via OpenRouter |
-| `anthropic/claude-sonnet-4-6` | Works via OpenRouter ✅ |
-| `google/gemini-2.5-flash` | Works via OpenRouter |
+| Model                                  | Notes                                                       |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `openai/gpt-4.1`                       | ⭐ Recommended — best balance of capability and reliability |
+| `openai/gpt-4.1-mini`                  | Best cost/performance ratio                                 |
+| `openai/gpt-4o`                        | Legacy, still works                                         |
+| `anthropic/claude-sonnet-4-5-20250929` | Works via OpenRouter                                        |
+| `anthropic/claude-sonnet-4-6`          | Works via OpenRouter ✅                                     |
+| `google/gemini-2.5-flash`              | Works via OpenRouter                                        |
 
 > **Do NOT use** `openai/gpt-5`, `openai/gpt-5-mini`, `openai/o1`, `openai/o3` via OpenRouter — they reject the `temperature` parameter required by Graphiti (GitHub issue [#878](https://github.com/getzep/graphiti/issues/878)).
 
@@ -1051,12 +1040,12 @@ Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
-| Name        | Type     | Description                                                    | Required | Default |
-| ----------- | -------- | -------------------------------------------------------------- | -------- | ------- |
-| `operation` | `string` | The operation to perform on the note (`rename`, `delete`)     | Yes      |         |
-| `path`      | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md` | Yes      |         |
+| Name        | Type     | Description                                                                                                                              | Required | Default |
+| ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `operation` | `string` | The operation to perform on the note (`rename`, `delete`)                                                                                | Yes      |         |
+| `path`      | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md`               | Yes      |         |
 | `newPath`   | `string` | The new note path (required only for rename). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No       |         |
-| `vault_id`  | `string` | Optional vault ID to target specific vault                     | No       |         |
+| `vault_id`  | `string` | Optional vault ID to target specific vault                                                                                               | No       |         |
 
 ---
 
@@ -1471,8 +1460,6 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 Our focus remains on expanding MegaMem's capabilities while maintaining simplicity and performance:
 
 - **Production Release**: Prepare for a public GitHub release (versioning per Obsidian guidelines, PR processes) and submission to the Obsidian community plugin repository.
-- **Optimized Edge Type Generation**: Research quality-ranking for LLM-generated edge types, auto-pruning of zero-occurrence edges after sync, and a curated core + domain expansion pack model.
-- **Revenue Models**: Investigate "Pro" features and provide rich vault templates.
 - **Infrastructure**: Prioritize making core sync reliable and schema management intuitive as prerequisites for advanced features like graph visualization.
 - **Advanced Sync Features**: Implement "Sync on Save" and configurable scheduled sync intervals, building on the current sequential sync architecture.
 - **Graph Visualization**: Evaluate and integrate suitable libraries (e.g., d3.js, three.js, cytoscape) to provide an interactive graph view of user knowledge.

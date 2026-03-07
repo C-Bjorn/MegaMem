@@ -1,224 +1,282 @@
-# MegaMem: Obsidian MCP with SuperPowers
+# MegaMem — Obsidian × Knowledge Graph × MCP
 
-## Graphiti | GraphRAG | MCP
+> **Temporal memory for AI assistants, powered by your Private vault**
 
-Transform your Obsidian vault into a temporal knowledge graph powered by Graphiti. This plugin automatically discovers schema patterns from your notes' frontmatter and syncs them to a knowledge graph accessible by AI assistants through the Model Context Protocol (MCP).
+MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-### ALPHA Launch
+[![Version](https://img.shields.io/badge/version-1.3.4-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
-**IMPORTANT** _Not all features and functions are fully tested. We actively use this plugin every day with our internal team, working on Windows with Neo4j. Early tests on macOS are working great! Although the infrastructure is there to support Linux & other database providers, we haven't fully tested them yet._
-
-- **Development Repo** is private, along with obsidian source code. As we near Beta Launch, all source code will be pushed to this repo and request made to Obsidian Community Plugins.
-- **Early beta-testers** are encouraged to contact the developer for a full obsidian template and customization services. Trust me, even at this stage, it's worth it(!)
+---
 
 ## 🌟 Key Features
 
-### 🔍 Automatic Schema Discovery
+### 🧠 Temporal Knowledge Graph
 
-- **Smart Vault Scanning**: Automatically discovers entity types and properties from your existing notes' frontmatter
-- **Intelligent Type Inference**: Analyzes actual values to determine property types (string, number, date, array, etc.)
-- **No Manual Configuration**: Unlike traditional approaches, you don't need to define schemas manually
+Sync your Obsidian notes to a graph database. Entities become nodes, relationships are extracted by AI, and every fact is timestamped so the graph evolves as your knowledge does — without losing history.
 
-### 🏗️ Schema Management
+### 🔍 Auto Schema Discovery
 
-- **Visual Schema Editor**: Intuitive interface to review and customize discovered schemas
-- **Property Management**: Toggle properties on/off, edit descriptions, and refine types
-- **Pydantic Model Generation**: One-click generation of Python models for Graphiti integration
-- **Best Practices Compliance**: Automatic validation against Graphiti naming conventions and protected attributes
+The plugin scans your vault's frontmatter and automatically infers entity types, property types, and relationships. No manual schema definition required. Write your notes, the schema emerges.
 
-### 🔄 Enhanced Knowledge Graph Sync
+### 🤖 19 MCP Tools for AI Assistants
 
-- **Intelligent Auto Sync**: Smart synchronization with granular control over when and what gets synced
-- **Filtering Options**: Choose between syncing "New notes only" or "New and updated notes"
-- **Real-time Synchronization**: Automatic sync on save, scheduled intervals, and manual triggers
-- **Custom Entity Support**: Define your own entity types beyond standard Person/Company models
-- **Relationship Mapping**: Automatically extract and map relationships between entities
+A full MCP server (10 graph tools + 9 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
 
-### 🤖 AI Assistant Integration
+### 🏗️ Custom Ontology Manager
 
-- **MCP Protocol Support**: Make your knowledge graph accessible to Claude and other AI assistants
-- **Contextual Search**: AI can query your knowledge graph for relevant information
-- **Dynamic Ontologies**: Your custom schemas are understood by AI assistants
-- **Enhanced AI Responses**: Get more accurate, context-aware responses based on your personal knowledge
+Define your own entity types, edge types, and property descriptions. Generate Pydantic models with one click. The AI understands your custom data structures during extraction.
 
-## 🚀 Getting Started
+### ⚡ Obsidian CLI Integration
 
-### Prerequisites
+All 9 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter.
 
-1. **Obsidian**: Version 1.10.1 or higher
-2. **Database**: Neo4j Desktop or FalkorDB (via Docker)
-3. **Python**: Version 3.11+ (for MCP server)
-4. **Node.js**: Version 18+ (for development)
+### 🔄 Intelligent Sync
 
-### Quick Setup
+Auto-sync on interval, sync on demand, or trigger from MCP. Filter by folder inclusion/exclusion. Choose "new only" or "new + updated". Frontmatter-tracked `mm_uid` ensures path-independent note identity.
 
-1. Install the plugin from Obsidian Community Plugins (coming soon) or build from source
-2. Set up your graph database (Neo4j or FalkorDB)
-3. Configure the MCP server for AI integration
-4. Open the Schema Manager to discover your vault's patterns
-5. Start syncing your notes to the knowledge graph!
+### ✦ MegaMem Pro _(new)_
+
+A dedicated **Pro tab** in plugin settings for licensed Stewards. Validate your API key, check and install content packages (vault templates, ontology packs), and access upcoming hosted services — all in-plugin. Free plan users keep all MCP tools; Pro is content delivery and future hosted features.
+
+---
+
+## 🚀 BETA Launch
+
+MegaMem is **stable in daily production use** and currently in public beta. We're actively seeking testers to stress-test the system across diverse environments — different vaults, databases, LLM providers, and operating systems. If you find something, open an issue. If it works great, tell someone.
+
+- **Install now** via [BRAT](https://github.com/TfTHacker/obsidian42-brat) → `C-Bjorn/megamem-mcp`
+- Python components install **automatically** on first launch — no manual downloads
+- Windows (Neo4j) is most battle-tested; macOS works great; Linux support is there but less tested
+
+---
+
+## 🛠️ MCP Tools Reference
+
+All 19 tools are available to Claude Desktop and any MCP-compatible client.
+
+### Graph Operations (10)
+
+| Tool                      | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `add_memory`              | Add an episode/memory to the knowledge graph        |
+| `add_conversation_memory` | Store a conversation as a structured memory episode |
+| `search_memory_nodes`     | Semantic search for entity nodes in the graph       |
+| `search_memory_facts`     | Search for relationships and facts between entities |
+| `get_episodes`            | Retrieve the most recent N episodes from a group    |
+| `get_entity_edge`         | Get relationships for a specific entity by name     |
+| `delete_entity_edge`      | Remove a specific relationship edge by UUID         |
+| `delete_episode`          | Remove a specific episode by ID                     |
+| `list_group_ids`          | List all group IDs (namespaces) in the vault        |
+| `clear_graph`             | Clear the entire memory graph (use with caution)    |
+
+### Obsidian File Operations (9) — via Obsidian CLI
+
+| Tool                        | Description                                                            |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `search_obsidian_notes`     | Search vault notes by filename and/or content                          |
+| `read_obsidian_note`        | Read a note's full content (with optional line map for editing)        |
+| `update_obsidian_note`      | Update a note — 5 modes: full file, frontmatter, append, range, editor |
+| `create_obsidian_note`      | Create a new note at a specified path                                  |
+| `list_obsidian_vaults`      | List all registered Obsidian vaults                                    |
+| `explore_vault_folders`     | Explore vault folder structure (tree/flat/paths output)                |
+| `create_note_with_template` | Create a note using a Templater template with intelligent routing      |
+| `manage_obsidian_folders`   | Create, rename, or delete vault folders                                |
+| `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)             |
+
+> Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands)
+
+---
 
 ## 📋 How It Works
 
 ### 1. Schema Discovery
 
-The plugin scans your vault to find patterns in frontmatter:
+The plugin scans your vault frontmatter and infers entity types and properties:
 
 ```yaml
 ---
 type: Person
-name: "John Doe"
-occupation: "Software Engineer"
-company: "TechCorp"
-skills: ["Python", "JavaScript", "GraphQL"]
+name: "Jane Smith"
+role: "Researcher"
+organization: "TechCorp"
+tags: ["AI", "Knowledge Graphs"]
 ---
 ```
 
-### 2. Automatic Type Detection
+### 2. Pydantic Model Generation
 
-Based on your actual data, the plugin infers property types and generates schemas:
+Your frontmatter patterns become typed Graphiti extraction models:
 
 ```python
-class Person(BaseModel):
+class Person(BaseNode):
     name: Optional[str] = Field(None, description="Person's full name")
-    occupation: Optional[str] = Field(None, description="Current occupation")
-    company: Optional[str] = Field(None, description="Current employer")
-    skills: Optional[List[str]] = Field(None, description="List of skills")
+    role: Optional[str] = Field(None, description="Current role or title")
+    organization: Optional[str] = Field(None, description="Current employer")
 ```
 
-### 3. Knowledge Graph Sync
+### 3. Temporal Graph Sync
 
-Your notes are transformed into a temporal knowledge graph:
+Notes are processed through Graphiti's extraction pipeline:
 
-- Entities become nodes with properties
-- Relationships are extracted from content
-- Consecutive notes dynamically update the Graph
-- AI assistants can query this structured data
+- Entities become graph nodes with versioned properties
+- Relationships are extracted from note content via LLM
+- `mm_uid` frontmatter tracks each note across renames and moves
+- AI assistants query this structured graph via MCP
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+| Component | Minimum                 | Notes                                                         |
+| --------- | ----------------------- | ------------------------------------------------------------- |
+| Obsidian  | **1.12.4+ (installer)** | Must run the full installer — in-app updates don't enable CLI |
+| Python    | 3.11+                   | Managed automatically via UV                                  |
+| Database  | Neo4j 5+ or FalkorDB 1+ | Neo4j Desktop is easiest for local use                        |
+
+> ⚠️ **Obsidian installer required**: Download and run the full installer from [obsidian.md/download](https://obsidian.md/download). In-app auto-update does **not** update the CLI binary. Then go to `Settings → General → Command line interface → Register`.
+
+### Install via BRAT _(recommended)_
+
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from Community Plugins
+2. BRAT → **Add Beta Plugin** → paste `C-Bjorn/megamem-mcp`
+3. A dialog appears after ~3 seconds: click **"Install / Update Components"**
+   - Downloads and installs `graphiti_bridge` + `mcp-server` automatically
+4. Plugin is ready
+
+### 7-Step Setup
+
+**Step 0 — Register Obsidian CLI** _(required for file tools)_
+Run the Obsidian 1.12.4+ installer → `Settings → General → CLI → Register` → restart terminal → verify with `obsidian version`
+
+**Step 1 — Set up a graph database**
+[Neo4j Desktop](https://neo4j.com/download/) (recommended) or FalkorDB via Docker. See [Database Setup Guide](https://c-bjorn.github.io/MegaMem/#/guides/database-setup).
+
+**Step 2 — Install Python dependencies**
+Plugin Settings → Python Environment → **"Install Dependencies"** (uses UV by default — works on macOS/Windows/Linux).
+
+**Step 3 — Configure LLM provider**
+Plugin Settings → API Keys → enter your key. Click **"Load Defaults"** to populate recommended models.
+
+**Step 4 — Connect the database**
+Plugin Settings → Database Configuration → enter your connection details → **"Test Connection"** → **"Initialize Schema"**.
+
+**Step 5 — Generate your MCP config**
+Plugin Settings → Servers → **"Generate Config"** → copy the JSON → paste into `claude_desktop_config.json` → restart Claude Desktop.
+
+**Step 6 — (Optional) Configure sync**
+Set included/excluded folders, choose sync mode (new only vs. new + updated), set auto-sync interval.
+
+**Step 7 — Start syncing**
+Two ways to sync:
+
+- **Single note:** click the **sync icon** (top-right of any note window) to sync the current note
+- **Bulk sync:** click the **MegaMem icon** in the left sidebar to open the **Sync Manager**
+
+> ⚠️ **Notes must have a `type` property in their frontmatter to use bulk Sync Manager.**
+
+---
 
 ## 🎯 Use Cases
 
 ### Personal Knowledge Management
 
-- Track people you meet, companies you research, projects you work on
-- Build a personal CRM within Obsidian
-- Visualize connections between ideas and entities
+Build a graph of the people, projects, ideas, and relationships in your life. Ask Claude "what do I know about X?" and get answers drawn from your actual notes, with full temporal context. It works as a personal CRM, project tracker, and second brain — all from your existing vault without restructuring anything.
 
-### Research & Academia
+### AI-Assisted Note-Taking
 
-- Organize research papers, authors, and concepts
-- Track citations and relationships between works
-- Build domain-specific knowledge graphs
+With 9 native Obsidian file tools, Claude can create, search, and update notes directly in your vault mid-conversation. Draft a meeting note, file it in the right folder, sync it to the graph — all in one step, without leaving the chat.
 
-### Business Intelligence
-
-- Track competitors, market trends, and industry insights
-- Build company knowledge bases
-- Create structured data from unstructured notes
-
-### Creative Projects
-
-- Manage characters, locations, and plot elements for writing
-- Track inspiration sources and creative connections
-- Build world-building databases
-
-## 🛠️ Configuration
-
-### Database Setup
-
-Choose between:
-
-- **Neo4j Desktop**: Full-featured graph database with visualization
-- **FalkorDB**: Lightweight Redis-based graph database
-- **Kuzu**: coming soon
-- **Neptune**: coming soon
-
-### Model Context Protocol (MCP) Server
-
-The plugin features a custom MCP server that seamlessly bridges your Obsidian vault with AI assistants. It enables:
-
-- **Intelligent Communication**: Facilitates communication between your vault, Graphiti, and connected AI models.
-- **AI-Powered Access**: Allows AI assistants to directly interact with and query your knowledge graph.
-- **Dynamic Schema Sync**: Manages the synchronization of your discovered schema patterns, ensuring AI understands your custom data structures.
-
-### Plugin Settings
-
-- **Database Configuration**: Connection details and credentials
-- **Auto Sync Settings**: Enable/disable automatic synchronization with intelligent filtering
-- **Sync Options**: Choose between "New notes only" or "New and updated notes" for auto sync
-- **Sync Preferences**: Choose folders to include/exclude from synchronization
-- **Field Management**: Set globally ignored properties
-- **Advanced Options**: Batch sizes, logging, performance tuning, and sync intervals
-
-## 📚 Documentation
-
-Explore the comprehensive documentation for MegaMem to get started and deepen your understanding:
-
-### Getting Started
-
-- [**Introduction**](https://c-bjorn.github.io/MegaMem/) - Overview of MegaMem and its core concepts.
-- [**Quick Start Guide**](https://c-bjorn.github.io/MegaMem/#/quick-start) - Get up and running in minutes.
-- [**Plugin Settings**](https://c-bjorn.github.io/MegaMem/#/plugin-settings) - Detailed reference for all configuration options.
-
-### Advanced Guides
-
-- [**Database Setup**](https://c-bjorn.github.io/MegaMem/#/guides/database-setup) - Configure your preferred graph database.
-- [**Claude Desktop Integration**](https://c-bjorn.github.io/MegaMem/#/guides/claude-integration) - Connect MegaMem with Claude Desktop.
-- [**Custom Entity Types & Ontology Manager**](https://c-bjorn.github.io/MegaMem/#/guides/ontology-manager) - Define and manage your custom data schemas.
-- [**Sync Manager**](https://c-bjorn.github.io/MegaMem/#/guides/sync-manager) - Control how your notes are synchronized with the knowledge graph.
-- [**MCP Commands**](https://c-bjorn.github.io/MegaMem/#/mcp-commands) - Reference for available Model Context Protocol commands.
-
-### Community & Contribution
-
-- [**Roadmap**](https://c-bjorn.github.io/MegaMem/#/roadmap) - See what's coming next for MegaMem.
-- [**Contributing Guide**](https://c-bjorn.github.io/MegaMem/#/contributing) - Learn how to contribute to the project.
-- [**FAQ**](https://c-bjorn.github.io/MegaMem/#/faq) - Find answers to frequently asked questions.
-
-## 🤝 Community & Support
-
-- **GitHub Issues**: Report bugs or request features
-- **Discussions**: Share use cases and get help
-- **Discord**: Join our community (coming soon)
-- **Documentation**: Comprehensive guides and examples
-
-## 🔮 Roadmap
-
-### Current (v1.0)
-
-- ✅ Automatic schema discovery
-- ✅ Enhanced auto sync with granular filtering
-- ✅ Intelligent sync options (new vs. new+updated notes)
-- ✅ Real-time and scheduled synchronization
-- ✅ MCP server integration
-- ✅ Essential UI components
-
-### Planned Features
-
-- 🔄 Visual graph exploration
-- 🔄 Advanced query builder
-- 🔄 Batch operations
-- 🔄 Plugin ecosystem integration
-- 🔄 Cloud sync options
-- 🔄 Mobile support
-
-## 💡 Philosophy
-
-This plugin embraces the principle of **progressive formalization**. Start with simple notes, let patterns emerge naturally, then gradually add structure as your knowledge grows. No need to define rigid schemas upfront – the plugin discovers them from your actual usage.
-
-## 🙏 Acknowledgments
-
-Built with:
-
-- [Obsidian API](https://github.com/obsidianmd/obsidian-api)
-- [Graphiti](https://github.com/getzep/graphiti) by Zep
-- [Svelte](https://svelte.dev/) & [UnoCSS](https://unocss.dev/)
-- Model Context Protocol (MCP) by Anthropic
-
-## 📄 License
-
-MIT License - see [LICENSE.txt](LICENSE.txt) for details
+_Also great for:_ research & academia (literature graphs, citation tracking), business intelligence (competitor research, knowledge bases), creative projects (world-building, character arcs), and multi-team knowledge management with namespaced vaults.
 
 ---
 
-**Transform your notes into knowledge. Build your personal AI-powered knowledge graph today.**
+## 📚 Documentation
 
-_Created by [Casey Bjørn](https://github.com/C-Bjorn)_
+### Getting Started
+
+- [Introduction](https://c-bjorn.github.io/MegaMem/) — Overview and core concepts
+- [Quick Start Guide](https://c-bjorn.github.io/MegaMem/#/quick-start) — Up and running in minutes
+- [Plugin Settings Reference](https://c-bjorn.github.io/MegaMem/#/plugin-settings) — All configuration options
+
+### Guides
+
+- [Database Setup](https://c-bjorn.github.io/MegaMem/#/guides/database-setup) — Neo4j and FalkorDB configuration
+- [Claude Desktop Integration](https://c-bjorn.github.io/MegaMem/#/guides/claude-integration) — MCP config and connection
+- [Ontology Manager](https://c-bjorn.github.io/MegaMem/#/guides/ontology-manager) — Custom entity types and schemas
+- [Sync Manager](https://c-bjorn.github.io/MegaMem/#/guides/sync-manager) — Sync behavior and controls
+
+### Reference
+
+- [MCP Commands](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — All 19 tools with full parameter reference
+- [FAQ](https://c-bjorn.github.io/MegaMem/#/faq) — Common questions answered
+
+---
+
+## 🤝 Community & Support
+
+- **[GitHub Issues](https://github.com/C-Bjorn/megamem-mcp/issues)** — Bug reports and feature requests
+- **[GitHub Discussions](https://github.com/C-Bjorn/megamem-mcp/discussions)** — Questions, use cases, show & tell
+- **[Submit & Fund Features](https://endogon.com/roadmap)** — Vote on and fund roadmap items
+- **[Contributing Guide](https://c-bjorn.github.io/MegaMem/#/contributing)** — How to contribute code or docs
+
+---
+
+## 🔮 Roadmap
+
+### Shipped ✅
+
+- Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
+- 19 MCP tools — 10 graph operations + 9 Obsidian file tools
+- Obsidian CLI integration (stateless, multi-vault, no WebSocket)
+- Auto schema discovery from vault frontmatter
+- Custom ontology manager with Pydantic model generation
+- Model Library — live model fetching from 8 LLM providers
+- Constrained ontology generation (edge type cap + deduplication)
+- Ontology file separation (`ontology.json` split from `data.json`)
+- Auto-update system — Python components auto-install and self-update
+- MegaMem Pro tab — license validation + content package delivery
+
+### In Progress / Near-term 🔄
+
+- Obsidian Community Plugins submission
+- Graph visualization within Obsidian
+- Advanced query builder
+
+### Future 🌱
+
+- Built-in LLM chat interface inside Obsidian
+- Cloud-hosted graph option (no local database required)
+- Mobile support
+- Additional database backends (Kuzu, Amazon Neptune)
+
+---
+
+## 💡 Philosophy
+
+MegaMem embraces **progressive formalization**: start with plain notes, let patterns emerge naturally, then add structure as your knowledge matures. The graph enriches your vault — it doesn't replace the way you write.
+
+> _Gate services, not tools._ All 19 MCP tools are free. Forever.
+
+---
+
+## 🙏 Built With
+
+- [Graphiti](https://github.com/getzep/graphiti) by Zep — temporal knowledge graph engine
+- [Obsidian API](https://github.com/obsidianmd/obsidian-api) — plugin foundation
+- [Model Context Protocol](https://modelcontextprotocol.io) by Anthropic — AI tool interface
+- [JSZip](https://stuk.github.io/jszip/) — in-plugin zip extraction
+- TypeScript + Svelte
+
+## 📄 License
+
+MIT — see [LICENSE.txt](LICENSE.txt)
+
+---
+
+**Transform your notes into knowledge. Give your AI a memory worth having.**
+
+_Built by [Casey Bjørn](https://github.com/C-Bjorn) @ [ENDOGON](https://endogon.com)_

@@ -10,22 +10,16 @@ tags:
   - semantic-search
 sidebar: auto
 date_created: 2025-09-23T11:19
-date_updated: 2025-09-28T11:36
+date_updated: 2026-03-07
 ---
 
 # MegaMem
 
-> These docs were written in about 30min with MegaMem, sourcing over 120 development docs loaded into the graph [love GraphRAG]. \*\*_Aside, I haven't read it all—their may be a few mistakes...that shall be corrected as time permits._
+> These docs were written in about 30 minutes with MegaMem, sourcing 120+ development docs loaded into the graph (GraphRAG in action). _Minor corrections made over time as features ship._
 
 MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vault with AI-powered graph databases, creating a seamless ecosystem for knowledge discovery, semantic search, and intelligent content management. With native Claude Desktop integration and support for multiple LLM providers, MegaMem transforms how you interact with your life.
 
 ## Key Features
-
-### Bi-directional Sync
-
-- Real-time synchronization between Obsidian and graph databases
-- Maintains data integrity across platforms
-- Supports both Neo4j and FalkorDB backends
 
 ### AI-Powered Knowledge Extraction
 
@@ -46,7 +40,7 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - **Kuzu**: Coming soon
 - **Amazon Neptune**: Coming soon
 
-### LLM Client Integraion (ie. Claude Desktop)
+### LLM Client Integration (Claude Desktop & more)
 
 - Native MCP (Model Context Protocol) server
 - Direct access to vault content from LLM conversations
@@ -58,10 +52,17 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - Flexible schema management
 - Advanced knowledge modeling capabilities
 
+### MegaMem Pro
+
+- In-plugin license key validation and content package delivery
+- Install vault templates and ontology packs directly from the Pro settings tab
+- Future: hosted AI services accessible from within Obsidian
+
 ## Quick Links
 
 - [**5-Minute Setup Guide**](quick-start.md) - Get started immediately
 - [**Plugin Settings**](plugin-settings.md) - Complete configuration reference
+- [**MCP Commands Reference**](mcp-commands.md) - All 19 MCP tools documented
 - [**Development Roadmap**](roadmap.md) - Upcoming features and timeline
 
 ## System Requirements

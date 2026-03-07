@@ -1,10 +1,40 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2025-09-28T11:36
+date_updated: 2026-03-07
 ---
 # MegaMem Plugin Settings
 
-This document provides a comprehensive overview of all available settings in the MegaMem plugin. Settings are organized into logical sections for easy navigation.
+The settings panel has two tabs at the top: **General Settings** (all configuration — database, LLM, sync, etc.) and **✦ MegaMem Pro** (license key and content packages).
+
+## ✦ MegaMem Pro Tab
+
+### License Key
+
+Enter your `mm_live_...` API key and click **Validate**. The key is stored in `data.json` and validated against `megamem.endogon.com`.
+
+**States:**
+- **Empty** — helper text with link to [endogon.com/stewards](https://endogon.com/stewards)
+- **Validating** — input disabled, spinner
+- **Valid** — green banner showing plan name, masked key, and expiry ("Active subscription" if on recurring plan) + **Remove Key** button
+- **Invalid** — red error message, input stays editable
+
+### Content Packages
+
+Only visible when a valid key is present. Shows one card per entitled package from your plan.
+
+**Each card displays:**
+- Package name and description
+- Installed version vs. available version
+- Status badge: **Not installed** / **Update available (vX.Y.Z)** / **Up to date**
+- **Install** or **Update** button (absent when up to date)
+
+On install/update: the plugin fetches a signed download URL from the edge function, downloads the zip, and extracts it to your vault root. `MegaMemPro/Version.md` is the version sentinel.
+
+### Premium Features
+
+Placeholder for upcoming hosted services — currently shows the **Ask Bjørn** coming-soon card.
+
+---
 
 ## API Keys
 

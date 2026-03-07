@@ -80,24 +80,36 @@ MegaMem's MCP server uses the **Obsidian CLI** (native since Obsidian 1.12) to r
 ### Step 1: Database Setup
 Setup your preferred database (Neo4j or FalkorDB - see [Database Setup](guides/database-setup.md) for details). **Kuzu & Amazon Neptune coming soon**
 
-### Step 2: LLM Configuration
-In Plugin Settings, add your LLM keys and configuration (select "Load Defaults" to start)
+### Step 2: Python Dependencies
+Under Python Environment (first accordion section), click **"Install Dependencies"**.
 
-### Step 3: Database Configuration
-In Plugin Settings, enter the Database Configuration and click "Test Connection" and then "Initialize Schema"
+Uses the **UV Package Manager** by default — recommended for all platforms (macOS, Windows, Linux). System Python is available for advanced users who prefer their own environment.
 
-### Step 4: Python Dependencies
-Under Python Environment (first accordion section), click "Install Dependencies".
+### Step 3: LLM Configuration
+In Plugin Settings → API Keys, add your LLM provider key and select "Load Defaults" to populate recommended models.
 
-**Installation Method:** The plugin now defaults to using the UV Package Manager, which is recommended for most users and provides better cross-platform compatibility (macOS, Windows, Linux). System Python is available for advanced users who prefer their own Python installation.
-
-**Note:** If you encounter installation issues on macOS or Windows, the plugin uses platform-specific extraction methods to ensure proper setup. The installation process will handle tar.gz archives on macOS/Linux and zip archives on Windows automatically.
+### Step 4: Database Configuration
+In Plugin Settings → Database Configuration, enter your connection details and click **"Test Connection"** then **"Initialize Schema"**.
 
 ### Step 5: Basic Setup Complete
 For basic functionality - leave everything else default.
 
-### Step 6: Advanced Configuration (Optional)
-For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-namespacing) settings, and review "Ontology Manager" section.
+> ⚠️ **Frontmatter requirement:** Notes must have a **`type`** property in their frontmatter to be synced. Without it, the note is skipped. Example:
+> ```yaml
+> ---
+> type: Person
+> name: "Jane Smith"
+> ---
+> ```
+
+### Step 6: Sync Your Notes
+
+Two ways to sync:
+- **Single note** — click the **sync icon** in the top-right of any note window to sync that note
+- **Bulk sync** — click the **MegaMem icon** in the left sidebar to open the **Sync Manager** for batch operations
+
+### Step 7: Advanced Configuration (Optional)
+For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-namespacing) settings, and review the "Ontology Manager" section.
 
 ## 🤖 MCP Server Setup (for Claude Desktop and other private LLM consoles)
 
@@ -116,10 +128,11 @@ For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-
 
 - [ ] Obsidian 1.12.4+ installer run and CLI registered in PATH
 - [ ] `obsidian version` returns a version string in terminal
-- [ ] Database connection successful
-- [ ] LLM provider responding correctly
 - [ ] Python dependencies installed
-- [ ] Plugin enabled and configured
+- [ ] Database connection successful (Test Connection ✓)
+- [ ] LLM provider responding correctly
+- [ ] At least one note has `type:` in frontmatter
+- [ ] Sync icon syncs a note successfully
 - [ ] Claude Desktop MCP connection active
 
 ---

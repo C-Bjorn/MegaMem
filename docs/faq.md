@@ -1,6 +1,11 @@
 # Frequently Asked Questions (FAQ)
 
 <details>
+<summary>What is MegaMem Pro?</summary>
+MegaMem Pro is the licensed tier for Stewards. It adds a dedicated <strong>Pro tab</strong> in plugin settings where you can validate your API key, view entitled content packages (vault templates, ontology packs), and install or update them directly in-plugin. All 19 MCP tools remain free — Pro gates content delivery and future hosted services. Get a license at <a href="https://endogon.com/stewards">endogon.com/stewards</a>.
+</details>
+
+<details>
 <summary>Why Obsidian?</summary>
 Obsidian provides a powerful, local-first knowledge base that integrates seamlessly with MegaMem. Its flexible linking and markdown support make it an ideal environment for building and interacting with your knowledge graph.
 </details>
