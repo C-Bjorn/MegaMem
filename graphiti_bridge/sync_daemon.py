@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Python Daemon for BGE Model Optimization
+Python Daemon — warm-start optimization for faster consecutive note syncs.
 Protocol: JSON only on stdout. All diagnostics via logging to stderr.
 """
 
@@ -139,43 +139,7 @@ warnings.filterwarnings(
 
 class SyncDaemon:
     def __init__(self):
-        self.bge_loaded = False
         self.running = True
-
-    def load_bge_models(self) -> bool:
-        """
-        Pre-load BGE cross-encoder using the same client as sync.py to warm caches.
-        Avoids depending on lazy_imports; mirrors sync.create_cross_encoder internals.
-        """
-        with time_operation("load_bge_models", "initialization"):
-            try:
-                with time_operation("bge_env_setup", "initialization"):
-                    # Match sync.py offline/cache behavior as much as possible
-                    os.environ.setdefault(
-                        "TRANSFORMERS_CACHE", os.path.expanduser("~/.cache/huggingface/hub"))
-                    os.environ.setdefault(
-                        "HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-                    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", os.path.expanduser(
-                        "~/.cache/sentence_transformers"))
-                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
-                with time_operation("bge_import", "imports"):
-                    # Import and instantiate BGE client explicitly (no network)
-                    from graphiti_core.cross_encoder.bge_reranker_client import BGERerankerClient  # type: ignore
-
-                with time_operation("bge_instantiation", "initialization"):
-                    _t0 = time.time()
-                    _ = BGERerankerClient()  # warm-up
-                    dt = time.time() - _t0
-                    logger.debug(f"[DAEMON] BGE warm-up complete in {dt:.2f}s")
-
-                self.bge_loaded = True
-                return True
-            except Exception as e:
-                # Strictly log to stderr, do not print to stdout
-                logger.error(f"[DAEMON] BGE warm-up failed: {e}")
-                self.bge_loaded = False
-                return False
 
     def _build_result_error(self, message: str) -> Dict[str, Any]:
         return {
@@ -275,62 +239,12 @@ class SyncDaemon:
         except Exception as e:
             return self._build_result_error(f"Failed to setup environment variables: {e}")
 
-        # FIX: Execute with proper async context management to prevent event loop race conditions
         try:
-            # FIX: Clean up any existing global event loop tasks before starting new sync
-            try:
-                # Use get_running_loop() which is Python 3.13 compatible
-                existing_loop = asyncio.get_running_loop()
-                if existing_loop and not existing_loop.is_closed():
-                    pending = [task for task in asyncio.all_tasks(
-                        existing_loop) if not task.done()]
-                    if pending:
-                        logger.debug(
-                            f"[DIAGNOSTIC] Canceling {len(pending)} lingering tasks from previous operations...")
-                        for task in pending:
-                            task.cancel()
-            except RuntimeError:
-                # No running loop exists - this is expected for new sync operations
-                pass
-            except Exception:
-                pass  # Silent cleanup
-
-            # Create new event loop for this sync operation
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            try:
-                # Run the sync with proper cleanup
-                result = loop.run_until_complete(self._run_single_note(cfg))
-
-                # FIX: Wait for all pending tasks before closing loop
-                pending = asyncio.all_tasks(loop)
-                if pending:
-                    logger.debug(
-                        f"[DIAGNOSTIC] Waiting for {len(pending)} pending tasks before loop cleanup...")
-                    try:
-                        # Cancel all pending tasks and wait for them to finish
-                        for task in pending:
-                            task.cancel()
-                        # Wait for cancellation to complete with timeout
-                        loop.run_until_complete(asyncio.gather(
-                            *pending, return_exceptions=True))
-                    except Exception as cleanup_error:
-                        logger.warning(
-                            f"[DIAGNOSTIC] Task cleanup error: {cleanup_error}")
-
-                return result
-
-            finally:
-                # Ensure event loop is properly closed
-                try:
-                    if not loop.is_closed():
-                        loop.close()
-                        logger.debug("[DIAGNOSTIC] Event loop closed safely")
-                except Exception as close_error:
-                    logger.warning(
-                        f"[DIAGNOSTIC] Error closing event loop: {close_error}")
-
+            # Non-ASCII entity names (e.g. Japanese) can still cause a silent sync failure
+            # due to Neo4j BM25 Lucene query errors in search_utils.py. asyncio.run()
+            # eliminates the RuntimeWarning symptom; the underlying Lucene sanitizer
+            # issue is a separate open investigation.
+            return asyncio.run(self._run_single_note(cfg))
         except Exception as e:
             logger.error(f"[DAEMON] Event loop execution error: {e}")
             return self._build_result_error(f"Async execution failed: {e}")
@@ -350,7 +264,6 @@ class SyncDaemon:
         elif command == "status":
             return {
                 "status": "success",
-                "bge_loaded": self.bge_loaded,
                 "running": self.running
             }
         else:
@@ -361,20 +274,18 @@ class SyncDaemon:
         Main daemon loop. Prints only JSON to stdout.
         """
         with time_operation("daemon_startup", "initialization"):
-            bge_ok = self.load_bge_models()
-
             # Log timing summary after initialization
             log_timing_summary()
 
+            logger.info("[DAEMON] Daemon ready")
             # Handshake
             ready_message = {
                 "status": "ready",
-                "bge_loaded": bool(bge_ok),
                 "timestamp": time.time()
             }
             print(json.dumps(ready_message), flush=True)
 
-        # Command loop with comprehensive task cleanup between commands
+        # Command loop
         while self.running:
             line = sys.stdin.readline()
             if not line:
@@ -395,32 +306,6 @@ class SyncDaemon:
             with time_operation("command_handling", "command_processing"):
                 response = self.handle_command(command_data)
             print(json.dumps(response), flush=True)
-
-            # FIX: Clean up any lingering background tasks after each command
-            try:
-                # Force garbage collection of any orphaned tasks
-                import gc
-                gc.collect()
-
-                # Cancel any remaining background tasks that might be hanging around
-                try:
-                    # Use get_running_loop() for Python 3.13 compatibility
-                    loop = asyncio.get_running_loop()
-                    if loop and not loop.is_closed():
-                        pending = [task for task in asyncio.all_tasks(
-                            loop) if not task.done()]
-                        if pending:
-                            logger.debug(
-                                f"[DIAGNOSTIC] Found {len(pending)} lingering tasks after command, canceling...")
-                            for task in pending:
-                                task.cancel()
-                except RuntimeError:
-                    # No running loop - this is expected in many cases
-                    pass
-                except Exception:
-                    pass  # Silent cleanup - don't break main loop
-            except Exception:
-                pass  # Silent cleanup - don't break main loop
 
         self.running = False
 

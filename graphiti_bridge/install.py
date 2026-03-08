@@ -57,9 +57,6 @@ def build_extras_list(config: Dict[str, Any]) -> List[str]:
         # Embedder provider extras
         'voyage',
         # Note: openai embedder is included in base graphiti-core
-
-        # Cross-encoder extras
-        'sentence-transformers'  # Required for BGE reranker support
     ]
 
     return all_extras

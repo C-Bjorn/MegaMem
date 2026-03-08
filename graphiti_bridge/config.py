@@ -48,10 +48,6 @@ class BridgeConfig:
     # Optional LLM Configuration
     llm_small_model: Optional[str] = None
 
-    # Optional Cross-Encoder Configuration
-    cross_encoder_client: Optional[str] = None
-    cross_encoder_model: Optional[str] = None
-
     # Optional Provider-specific settings
     azure_endpoint: Optional[str] = None
     azure_api_version: Optional[str] = None
@@ -100,12 +96,6 @@ class BridgeConfig:
                 'llm_model') or config_dict.get('llmModel', 'gpt-4o'),
             llm_small_model=config_dict.get(
                 'llm_small_model') or config_dict.get('llmSmallModel'),
-
-            # Cross-Encoder Configuration
-            cross_encoder_client=config_dict.get(
-                'cross_encoder_client') or config_dict.get('crossEncoderClient'),
-            cross_encoder_model=config_dict.get(
-                'cross_encoder_model') or config_dict.get('crossEncoderModel'),
 
             # Embedder Configuration
             embedder_provider=config_dict.get(

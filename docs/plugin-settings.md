@@ -176,15 +176,6 @@ Configure language model providers and specific models.
 #### Actions:
 - **Test Embedding** <i data-lucide="activity"></i>: Test your embedding provider configuration
 
-### Cross-Encoder Provider <i data-lucide="check-circle"></i>
-- Description: Choose your cross-encoder/reranker provider for improved search ranking
-- Options: None - Disable reranking, OpenAI Reranker, BGE Reranker (Local), Gemini Reranker
-- Developer Note: Improves search result quality through reranking. Currently the only fully Private Cross-Encoder is "BGE Reranker" (from huggingface) which is not configurable. *In the future, MegaMem will support selecting multiple models. Also, this can add a lot of time to each sync, so we recommend enabling "Experimental Daemon Mode" in Development Options when running BGE.*
-
-### Cross-Encoder Model <i data-lucide="check-circle"></i>
-- Description: Specific model for cross-encoding/reranking operations
-- Developer Note: Conditionally visible based on provider selection.
-
 ### Provider Testing
 #### Actions:
 - **Test Full Pipeline** <i data-lucide="cpu"></i>: Test that your LLM and embedding providers work together correctly with full pipeline testing
@@ -484,8 +475,8 @@ Experimental features and development tools.
 - Developer Note: Visual development status indicators throughout the UI.
 
 ### Experimental Daemon Mode <i data-lucide="check-circle"></i>
-- Description: Use persistent Python daemon to eliminate BGE model loading overhead (reduces sync time by ~60%)
-- Developer Note: Significant performance improvement for sync operations.
+- Description: Keeps a Python process warm between syncs for faster consecutive note processing
+- Developer Note: Significant performance improvement for consecutive sync operations.
 
 ### Load Daemon on Launch <i data-lucide="check-circle"></i>
 - Description: Start Python daemon when plugin loads to eliminate first-sync delay (requires Experimental Daemon Mode)

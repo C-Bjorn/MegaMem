@@ -30,8 +30,6 @@ import asyncio
 import logging
 import time
 import os
-SKIP_BGE_IMPORT = os.getenv('SKIP_BGE_IMPORT', 'false').lower() == 'true'
-SKIP_GEMINI_IMPORT = os.getenv('SKIP_GEMINI_IMPORT', 'false').lower() == 'true'
 SKIP_VOYAGE_IMPORT = os.getenv('SKIP_VOYAGE_IMPORT', 'false').lower() == 'true'
 
 # Diagnostics buffer collected during run and attached to stdout JSON so callers that
@@ -50,25 +48,6 @@ except Exception:
     pass
 
 # Import timing removed - not useful in production
-
-# Cross-encoder imports with graceful fallbacks
-# LAZY IMPORT: BGE will be imported only when actually needed to avoid 35s startup
-BGE_CROSS_ENCODER_AVAILABLE = None  # Will check on first use
-BGERerankerClient = None
-
-# Global cache for BGE cross-encoder to prevent repeated HuggingFace downloads
-_BGE_CROSS_ENCODER_INSTANCE = None
-
-GEMINI_CROSS_ENCODER_AVAILABLE = False
-GeminiRerankerClient = None
-try:
-    from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
-    GEMINI_CROSS_ENCODER_AVAILABLE = True
-except ImportError:
-    pass  # Gemini cross-encoder not available (requires google-genai)
-
-# OpenAI cross-encoder always available (already imported above)
-OPENAI_CROSS_ENCODER_AVAILABLE = True
 
 
 # FalkorDB driver import with graceful fallback
@@ -600,219 +579,23 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
     return embedder
 
 
-def create_disabled_cross_encoder():
+def _make_noop_cross_encoder():
     """
-    Create a privacy-preserving disabled cross-encoder using OpenAI client with fake config.
-    This prevents unauthorized external API calls while satisfying Graphiti's type requirements.
+    Minimal stub satisfying Graphiti's cross_encoder constructor requirement.
+    Graphiti hardcodes RRF for ranking internally; this arg is unused for add_episode
+    and search. Passing None causes Graphiti to instantiate OpenAIRerankerClient() as
+    its default, which crashes without OPENAI_API_KEY. This stub satisfies the
+    interface silently with zero API calls.
     """
     from graphiti_core.llm_client.config import LLMConfig
 
-    # Create OpenAI reranker with a fake config that won't make real API calls
-    fake_config = LLMConfig(
-        api_key="disabled-for-privacy",
-        model="disabled-model"
-    )
+    noop = OpenAIRerankerClient(config=LLMConfig(api_key="noop", model="noop"))
 
-    # Create the client but override the rank method (not rerank!)
-    disabled_client = OpenAIRerankerClient(config=fake_config)
+    async def rank(query: str, passages: list, top_k=None):
+        return [(p, 0.0) for p in passages]
 
-    # Override the rank method to prevent API calls
-    from typing import Optional
-
-    async def disabled_rank(query: str, passages: list, top_k: Optional[int] = None):
-        """Return passages in original order without ranking - NO API CALLS"""
-        if top_k is not None and top_k < len(passages):
-            return passages[:top_k]
-        return passages
-
-    disabled_client.rank = disabled_rank
-    return disabled_client
-
-
-def create_cross_encoder(config: BridgeConfig, debug: bool = False):
-    """
-    Create cross-encoder client based on config.cross_encoder_client.
-    This allows independent selection of cross-encoder providers from LLM providers.
-
-    PRIVACY FIX: Returns DisabledCrossEncoder instead of None to prevent unauthorized OpenAI fallback.
-
-    @@vessel-protocol:Mimir governs:integration context:Cross-encoder provider abstraction with API key management
-    """
-    logger = logging.getLogger('graphiti_bridge.sync')
-
-    if debug:
-        logger.debug("[CROSS-ENCODER-DEBUG] create_cross_encoder() called")
-
-    cross_encoder_provider = 'none'  # Default value to prevent unbound variable
-    try:
-        cross_encoder_provider = getattr(
-            config, 'cross_encoder_client', 'none')
-        # Do NOT invent provider-specific default model names here.
-        # Respect explicit config.cross_encoder_model if provided; otherwise leave unset.
-        cross_encoder_model = getattr(config, 'cross_encoder_model', None)
-
-        if debug:
-            model_text = f" model={cross_encoder_model}" if cross_encoder_model else " (no model)"
-            logger.debug(
-                f"Cross-encoder: {cross_encoder_provider}{model_text}")
-
-        # Handle 'none' option to disable cross-encoder entirely (PRIVACY FIX: return disabled object instead of None)
-        if cross_encoder_provider == 'none' or cross_encoder_provider is None:
-            if debug:
-                logger.debug(
-                    "[CROSS-ENCODER-DEBUG] Cross-encoder disabled (provider set to 'none' or not configured) - using disabled cross-encoder for privacy")
-            return create_disabled_cross_encoder()
-
-        # Get API key for cross-encoder provider
-        cross_encoder_api_key = None
-        if hasattr(config, 'api_keys') and config.api_keys:
-            cross_encoder_api_key = config.api_keys.get(cross_encoder_provider)
-
-        # Fallback to general LLM API key if no specific cross-encoder key
-        if not cross_encoder_api_key and hasattr(config, 'llm_api_key') and config.llm_api_key:
-            cross_encoder_api_key = config.llm_api_key
-
-        # Keep behavior minimal: do not invent alternative provider aliases or cascade lookups.
-        # Providers that require no API key should be configured as such (e.g., 'bge' -> None).
-
-        # Create cross-encoder client based on provider
-        if cross_encoder_provider == 'openai':
-            if debug:
-                logger.debug(
-                    "[CROSS-ENCODER-DEBUG] Creating OpenAI cross-encoder")
-            # OpenAI Cross-Encoder/Reranker
-            if not OPENAI_CROSS_ENCODER_AVAILABLE:
-                if debug:
-                    logger.warning(
-                        "[CROSS-ENCODER-DEBUG] OpenAI cross-encoder requested but not available, disabling cross-encoder")
-                return None
-
-            # Use cross_encoder_model as primary model
-            primary_model = cross_encoder_model or 'gpt-5-nano'
-
-            # Create OpenAI reranker with only the primary model (no small_model usage)
-            cross_encoder = OpenAIRerankerClient(
-                config=LLMConfig(
-                    api_key=cross_encoder_api_key or 'dummy-key',
-                    model=primary_model
-                )
-            )
-            if debug:
-                logger.debug(
-                    f"OpenAI cross-encoder created with model: {primary_model}")
-
-        elif cross_encoder_provider == 'bge':
-            # LAZY IMPORT: Check and import BGE only when actually needed
-            global BGE_CROSS_ENCODER_AVAILABLE, BGERerankerClient
-
-            if BGE_CROSS_ENCODER_AVAILABLE is None:  # First time check
-                if not SKIP_BGE_IMPORT:
-                    try:
-                        if debug:
-                            logger.debug(
-                                "[CROSS-ENCODER-DEBUG] Lazy-loading BGE cross-encoder (first use)...")
-                        _t = time.time()
-                        from graphiti_core.cross_encoder.bge_reranker_client import BGERerankerClient as BGEClient
-                        BGERerankerClient = BGEClient
-                        BGE_CROSS_ENCODER_AVAILABLE = True
-                        if debug:
-                            logger.debug(
-                                f"[CROSS-ENCODER-DEBUG] BGE loaded in {time.time() - _t:.2f}s")
-                    except ImportError:
-                        BGE_CROSS_ENCODER_AVAILABLE = False
-                        if debug:
-                            logger.warning(
-                                "[CROSS-ENCODER-DEBUG] BGE import failed (sentence-transformers not installed)")
-                else:
-                    BGE_CROSS_ENCODER_AVAILABLE = False
-                    if debug:
-                        logger.debug(
-                            "[CROSS-ENCODER-DEBUG] BGE import skipped due to SKIP_BGE_IMPORT=true")
-
-            if debug:
-                logger.debug(
-                    f"[CROSS-ENCODER-DEBUG] BGE cross-encoder requested. Available: {BGE_CROSS_ENCODER_AVAILABLE}, Client: {BGERerankerClient is not None}")
-
-            # BGE Cross-Encoder (Local via sentence-transformers)
-            if not BGE_CROSS_ENCODER_AVAILABLE or BGERerankerClient is None:
-                if debug:
-                    logger.warning(
-                        "[CROSS-ENCODER-DEBUG] BGE cross-encoder not available, using disabled cross-encoder for privacy")
-                return create_disabled_cross_encoder()
-
-            # Use cached instance to prevent repeated HuggingFace model downloads
-            global _BGE_CROSS_ENCODER_INSTANCE
-            if _BGE_CROSS_ENCODER_INSTANCE is None:
-                try:
-                    # Set cache directory explicitly to ensure model is loaded from local cache
-                    import os
-                    os.environ['TRANSFORMERS_CACHE'] = os.path.expanduser(
-                        '~/.cache/huggingface/hub')
-                    os.environ['HF_HOME'] = os.path.expanduser(
-                        '~/.cache/huggingface')
-                    os.environ['SENTENCE_TRANSFORMERS_HOME'] = os.path.expanduser(
-                        '~/.cache/sentence_transformers')
-                    # Force offline mode - don't check for updates
-                    os.environ['HF_HUB_OFFLINE'] = '1'
-
-                    init_start = time.time()
-                    if debug:
-                        logger.debug(
-                            "[BGE-TIMING] Starting BGE initialization...")
-
-                    _BGE_CROSS_ENCODER_INSTANCE = BGERerankerClient()
-
-                except Exception as bge_error:
-                    if debug:
-                        logger.error(
-                            f"BGE cross-encoder instantiation failed: {bge_error}")
-                    # Return disabled cross-encoder to prevent unauthorized OpenAI fallback
-                    return create_disabled_cross_encoder()
-
-            cross_encoder = _BGE_CROSS_ENCODER_INSTANCE
-
-        elif cross_encoder_provider == 'gemini' or cross_encoder_provider == 'google' or cross_encoder_provider == 'google-ai':
-            if debug:
-                logger.debug(
-                    "[CROSS-ENCODER-DEBUG] Creating Gemini cross-encoder")
-            # Gemini Cross-Encoder/Reranker
-            if not GEMINI_CROSS_ENCODER_AVAILABLE or GeminiRerankerClient is None:
-                if debug:
-                    logger.warning(
-                        "[CROSS-ENCODER-DEBUG] Gemini cross-encoder requested but not available (requires google-genai), using disabled cross-encoder for privacy")
-                return create_disabled_cross_encoder()
-
-            model_name = cross_encoder_model or 'gemini-2.5-flash-lite-preview-06-17'
-
-            cross_encoder = GeminiRerankerClient(
-                config=LLMConfig(
-                    api_key=cross_encoder_api_key or 'dummy-key',
-                    model=model_name
-                )
-            )
-            if debug:
-                logger.debug(
-                    f"Gemini cross-encoder created with model: {model_name}")
-
-        else:
-            # Unsupported cross-encoder provider
-            if debug:
-                logger.warning(
-                    f"[CROSS-ENCODER-DEBUG] Unsupported cross-encoder provider '{cross_encoder_provider}', using disabled cross-encoder for privacy")
-            return create_disabled_cross_encoder()
-
-        if debug:
-            logger.debug(
-                f"[CROSS-ENCODER-DEBUG] Successfully created cross-encoder: {type(cross_encoder).__name__}")
-        return cross_encoder
-
-    except Exception as e:
-        if debug:
-            logger.warning(
-                f"[CROSS-ENCODER-DEBUG] Failed to create cross-encoder ({cross_encoder_provider}): {e}")
-            logger.debug(
-                "[CROSS-ENCODER-DEBUG] Cross-encoder creation failed, using disabled cross-encoder to prevent unauthorized fallbacks")
-        return create_disabled_cross_encoder()
+    noop.rank = rank
+    return noop
 
 
 async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
@@ -897,8 +680,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
             llm_client = OpenAIClient(**client_params)
 
-            # Create cross-encoder using unified helper function
-            cross_encoder = create_cross_encoder(config, debug)
+            cross_encoder = _make_noop_cross_encoder()
 
         elif config.llm_provider == "google" or config.llm_provider == "google-ai":
             # ===== GOOGLE AI PROVIDER =====
@@ -918,17 +700,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"Google AI LLM client instantiated with model: {config.llm_model}")
 
-            # Create cross-encoder using unified helper function
-            if debug:
-                logger.debug(
-                    "[INIT-DEBUG] About to call create_cross_encoder() for Google AI provider")
-            cross_encoder = create_cross_encoder(config, debug)
-            if debug and cross_encoder:
-                logger.debug(
-                    "[INIT-DEBUG] Google AI cross-encoder successfully created")
-            elif debug and cross_encoder is None:
-                logger.debug(
-                    "[INIT-DEBUG] Google AI cross-encoder disabled or unavailable")
+            cross_encoder = _make_noop_cross_encoder()
 
         elif config.llm_provider == "anthropic" or config.llm_provider == "claude":
             # ===== ANTHROPIC PROVIDER =====
@@ -948,17 +720,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"Anthropic LLM client instantiated with model: {config.llm_model}")
 
-            # Create cross-encoder using unified helper function
-            if debug:
-                logger.debug(
-                    "[INIT-DEBUG] About to call create_cross_encoder() for Anthropic provider")
-            cross_encoder = create_cross_encoder(config, debug)
-            if debug and cross_encoder:
-                logger.debug(
-                    "[INIT-DEBUG] Anthropic cross-encoder successfully created")
-            elif debug and cross_encoder is None:
-                logger.debug(
-                    "[INIT-DEBUG] Anthropic cross-encoder disabled or unavailable")
+            cross_encoder = _make_noop_cross_encoder()
 
         elif config.llm_provider == "ollama":
             # ===== OLLAMA PROVIDER =====
@@ -986,17 +748,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"Ollama LLM client instantiated with model: {config.llm_model}")
 
-            # Create cross-encoder using unified helper function
-            if debug:
-                logger.debug(
-                    "[INIT-DEBUG] About to call create_cross_encoder() for Ollama provider")
-            cross_encoder = create_cross_encoder(config, debug)
-            if debug and cross_encoder:
-                logger.debug(
-                    "[INIT-DEBUG] Ollama cross-encoder successfully created")
-            elif debug and cross_encoder is None:
-                logger.debug(
-                    "[INIT-DEBUG] Ollama cross-encoder disabled or unavailable")
+            cross_encoder = _make_noop_cross_encoder()
 
         elif config.llm_provider == "venice":
             # ===== VENICE.AI PROVIDER =====
@@ -1016,17 +768,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"Venice.ai LLM client instantiated with model: {config.llm_model} (base_url={venice_base})")
 
-            # Create cross-encoder using unified helper function
-            if debug:
-                logger.debug(
-                    "[INIT-DEBUG] About to call create_cross_encoder() for Venice provider")
-            cross_encoder = create_cross_encoder(config, debug)
-            if debug and cross_encoder:
-                logger.debug(
-                    "[INIT-DEBUG] Venice cross-encoder successfully created")
-            elif debug and cross_encoder is None:
-                logger.debug(
-                    "[INIT-DEBUG] Venice cross-encoder disabled or unavailable")
+            cross_encoder = _make_noop_cross_encoder()
 
         elif config.llm_provider == "openrouter":
             # ===== OPENROUTER PROVIDER =====
@@ -1077,17 +819,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"OpenRouter LLM client instantiated with model: {processed_model} (base_url={openrouter_base})")
 
-            # Create cross-encoder using unified helper function
-            if debug:
-                logger.debug(
-                    "[INIT-DEBUG] About to call create_cross_encoder() for OpenRouter provider")
-            cross_encoder = create_cross_encoder(config, debug)
-            if debug and cross_encoder:
-                logger.debug(
-                    "[INIT-DEBUG] OpenRouter cross-encoder successfully created")
-            elif debug and cross_encoder is None:
-                logger.debug(
-                    "[INIT-DEBUG] OpenRouter cross-encoder disabled or unavailable")
+            cross_encoder = _make_noop_cross_encoder()
 
         else:
             # ===== UNSUPPORTED PROVIDER =====
@@ -1574,7 +1306,7 @@ def serialize_value(value, seen=None, depth=0, max_depth=3):
                 result[key] = f"[embedding_vector_length_{len(val) if isinstance(val, list) else 'unknown'}]"
             elif key.startswith('_'):
                 # Skip truly private/internal attributes to reduce noise
-                if key not in ['_driver', '_session', '_llm_client', '_embedder', '_cross_encoder', '_graph_driver']:
+                if key not in ['_driver', '_session', '_llm_client', '_embedder', '_graph_driver']:
                     result[key] = serialize_value(
                         val, seen.copy(), depth + 1, max_depth)
             else:

@@ -125,27 +125,6 @@ def validate_config(config: BridgeConfig, test_type: str) -> list:
                 errors.append(
                     f"API key for {config.embedder_provider} provider is required")
 
-    # Cross-encoder validation for combined/pipeline operations
-    if test_type in ['combination', 'combination-test', 'combination-pipeline', 'schema-init']:
-        ce_provider = getattr(config, 'cross_encoder_client', 'none')
-        if ce_provider and ce_provider != 'none':
-            # Normalize Google/Gemini aliases for API key lookup
-            key_provider = 'google' if ce_provider in (
-                'gemini', 'google', 'google-ai') else ce_provider
-            if key_provider in ('openai', 'google'):
-                if not hasattr(config, 'api_keys') or not config.api_keys:
-                    errors.append(
-                        "API keys configuration is missing for cross-encoder")
-                elif not config.api_keys.get(key_provider):
-                    errors.append(
-                        f"API key for cross-encoder provider '{ce_provider}' is required")
-            elif ce_provider == 'bge':
-                # Local reranker; no API key required
-                pass
-            else:
-                errors.append(
-                    f"Unsupported cross-encoder provider: {ce_provider}")
-
     return errors
 
 
@@ -552,69 +531,6 @@ async def test_combination_with_pipeline(config: BridgeConfig) -> Tuple[bool, st
             relationships_count = len(result.edges) if hasattr(
                 result, 'edges') else 0
 
-            # Build structured cross-encoder info for machine parsing (provider/model/status)
-            cross_encoder_info = {
-                "provider": getattr(config, 'cross_encoder_client', 'none'),
-                "model": getattr(config, 'cross_encoder_model', None),
-                "status": "none",
-                "active": False,
-                "details": {}
-            }
-
-            try:
-                # Graphiti may expose cross-encoder as .cross_encoder or ._cross_encoder depending on version
-                cross_encoder_instance = None
-                if hasattr(graphiti, 'cross_encoder') and getattr(graphiti, 'cross_encoder') is not None:
-                    cross_encoder_instance = getattr(graphiti, 'cross_encoder')
-                    cross_encoder_info['status'] = 'loaded'
-                    cross_encoder_info['active'] = True
-                elif hasattr(graphiti, '_cross_encoder') and getattr(graphiti, '_cross_encoder') is not None:
-                    cross_encoder_instance = getattr(
-                        graphiti, '_cross_encoder')
-                    cross_encoder_info['status'] = 'loaded'
-                    cross_encoder_info['active'] = True
-                else:
-                    if cross_encoder_info['provider'] and cross_encoder_info['provider'] != 'none':
-                        cross_encoder_info['status'] = 'failed'
-                    else:
-                        cross_encoder_info['status'] = 'none'
-
-                # Extract cross-encoder details if available
-                if cross_encoder_instance:
-                    try:
-                        # Get class name and config details
-                        cross_encoder_info['details']['class_name'] = cross_encoder_instance.__class__.__name__
-
-                        # Try to get model info from config if available
-                        if hasattr(cross_encoder_instance, 'config'):
-                            config_obj = cross_encoder_instance.config
-                            if hasattr(config_obj, 'model'):
-                                cross_encoder_info['details']['actual_model'] = config_obj.model
-                            if hasattr(config_obj, 'api_key') and config_obj.api_key:
-                                cross_encoder_info['details']['has_api_key'] = True
-
-                        # For BGE, show it's using local model
-                        if 'BGE' in cross_encoder_instance.__class__.__name__:
-                            cross_encoder_info['details']['type'] = 'local'
-                            cross_encoder_info['details']['note'] = 'BGE uses local model, ignores model parameter'
-                        else:
-                            cross_encoder_info['details']['type'] = 'api'
-
-                    except Exception as detail_error:
-                        cross_encoder_info['details']['extraction_error'] = str(
-                            detail_error)
-
-            except Exception as e:
-                cross_encoder_info['status'] = 'unknown'
-                cross_encoder_info['details']['error'] = str(e)
-
-            # Legacy message format for backward compatibility
-            cross_encoder_status = "none"
-            if cross_encoder_info['status'] == 'loaded':
-                cross_encoder_status = f"{cross_encoder_info['provider']}/{cross_encoder_info['model'] or 'default'}"
-            elif cross_encoder_info['status'] == 'failed':
-                cross_encoder_status = f"{cross_encoder_info['provider']} (failed to load)"
-
         except Exception as episode_error:
             return False, f"Episode creation failed: {str(episode_error)}", get_latency_ms(start_time)
         finally:
@@ -625,9 +541,9 @@ async def test_combination_with_pipeline(config: BridgeConfig) -> Tuple[bool, st
                 except Exception:
                     pass
 
-        # Pipeline success - episode created with LLM, embedding, and cross-encoder operations
+        # Pipeline success - episode created with LLM and embedding operations
         latency = get_latency_ms(start_time)
-        message = f"Full pipeline test successful - LLM: {config.llm_provider}/{config.llm_model}, Embedding: {config.embedder_provider}/{config.embedding_model}, Cross-encoder: {cross_encoder_status}, Episode: {episode_uuid}, Entities: {entities_count}, Relationships: {relationships_count}"
+        message = f"Full pipeline test successful - LLM: {config.llm_provider}/{config.llm_model}, Embedding: {config.embedder_provider}/{config.embedding_model}, Episode: {episode_uuid}, Entities: {entities_count}, Relationships: {relationships_count}"
 
         # Return tuple format to match function signature
         return True, message, latency

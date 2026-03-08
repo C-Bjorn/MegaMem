@@ -1789,10 +1789,6 @@ WORKFLOW:
                 "embedderProvider", "openai"),
             embedding_model=obsidian_config.get(
                 "embeddingModel", "text-embedding-3-small"),
-            # Cross-Encoder configuration (ensure Graphiti gets an instantiated cross-encoder instead of defaulting)
-            cross_encoder_client=obsidian_config.get(
-                "crossEncoderClient", "none"),
-            cross_encoder_model=obsidian_config.get("crossEncoderModel"),
             database_type=database_type,
             database_url=database_url,
             database_username=current_db_config.get(
