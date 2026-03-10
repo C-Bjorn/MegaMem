@@ -43,6 +43,10 @@ def detect_obsidian_binary() -> Optional[str]:
                 return path
 
     elif system == "Darwin":
+        # macOS CLI registration (Obsidian Settings → General → CLI → Register CLI) adds
+        # /Applications/Obsidian.app/Contents/MacOS to PATH via ~/.zprofile.
+        # The binary is the same main Obsidian binary — it acts as a CLI bridge
+        # to the running Obsidian app via IPC. Obsidian MUST be running for CLI calls to work.
         mac_path = "/Applications/Obsidian.app/Contents/MacOS/Obsidian"
         if os.path.isfile(mac_path):
             return mac_path
@@ -91,26 +95,91 @@ class ObsidianCLI:
 
     # ─── Internal Helpers ────────────────────────────────────────────────────
 
+    def _make_subprocess_env(self) -> Optional[dict]:
+        """
+        macOS: Obsidian CLI locates its IPC socket via TMPDIR.
+        Claude Desktop spawns MCP servers through a stripped environment that
+        drops TMPDIR entirely. tempfile.gettempdir() returns /tmp when TMPDIR
+        is unset, but Obsidian's socket lives in /var/folders/.../T/ (user-specific).
+        Fix: use `getconf DARWIN_USER_TEMP_DIR` to read the real path from the kernel.
+        Returns None on Windows/Linux — full env inherited unchanged.
+        """
+        if platform.system() != "Darwin":
+            return None
+        env: dict = {}
+        # TMPDIR: getconf DARWIN_USER_TEMP_DIR reads from the kernel without needing
+        # TMPDIR to be set — gives the correct /var/folders/.../T/ path.
+        tmpdir = os.environ.get("TMPDIR")
+        if not tmpdir:
+            try:
+                r = subprocess.run(
+                    ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"],
+                    capture_output=True, text=True, timeout=2
+                )
+                if r.returncode == 0:
+                    tmpdir = r.stdout.strip()
+            except Exception:
+                pass
+        import tempfile
+        env["TMPDIR"] = tmpdir or tempfile.gettempdir()
+        env["HOME"] = os.environ.get("HOME") or os.path.expanduser("~")
+        env["PATH"] = os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env["USER"] = os.environ.get("USER") or ""
+        if not env["USER"]:
+            try:
+                import pwd
+                env["USER"] = pwd.getpwuid(os.getuid()).pw_name
+            except Exception:
+                pass
+        # Use INFO so this appears in logs — confirms the env is being built
+        logger.info(f"[CLI] subprocess env: TMPDIR={env.get('TMPDIR')} HOME={env.get('HOME')}")
+        return env
+
     def _run(self, vault: str, *args: str, timeout: int = 30) -> tuple[str, int]:
-        """Run a vault-scoped CLI command. Returns (stdout, exit_code)."""
+        """Run a vault-scoped CLI command. Returns (stdout, exit_code).
+        On macOS, timeout is capped at 10s — CLI calls respond in <1s when working,
+        and a short cap prevents the 30s hang from outlasting Claude Desktop's patience.
+        """
+        if platform.system() == "Darwin":
+            timeout = min(timeout, 10)
         cmd = [self.binary, f"vault={vault}", *args]
         logger.debug(f"[CLI] {cmd[0]} vault={vault} {args[0] if args else ''}")
-        result = subprocess.run(
-            cmd, capture_output=True, shell=False,
-            text=True, encoding="utf-8", errors="replace", timeout=timeout
-        )
-        stdout = (result.stdout or "").replace("\r\n", "\n").strip()
-        return stdout, result.returncode
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, shell=False,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=timeout, env=self._make_subprocess_env()
+            )
+            stdout = (result.stdout or "").replace("\r\n", "\n").strip()
+            return stdout, result.returncode
+        except subprocess.TimeoutExpired:
+            logger.error(f"[CLI] Timeout ({timeout}s): vault={vault} {args[0] if args else ''}")
+            return f"Error: Command timed out after {timeout}s", 1
+        except Exception as e:
+            logger.error(f"[CLI] Subprocess error: {e}")
+            return f"Error: {e}", 1
 
     def _run_global(self, *args: str, timeout: int = 15) -> tuple[str, int]:
-        """Run a vault-agnostic CLI command (vaults, version)."""
+        """Run a vault-agnostic CLI command (vaults, version).
+        On macOS, timeout is capped at 10s for the same reason as _run().
+        """
+        if platform.system() == "Darwin":
+            timeout = min(timeout, 10)
         cmd = [self.binary, *args]
-        result = subprocess.run(
-            cmd, capture_output=True, shell=False,
-            text=True, encoding="utf-8", errors="replace", timeout=timeout
-        )
-        stdout = (result.stdout or "").replace("\r\n", "\n").strip()
-        return stdout, result.returncode
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, shell=False,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=timeout, env=self._make_subprocess_env()
+            )
+            stdout = (result.stdout or "").replace("\r\n", "\n").strip()
+            return stdout, result.returncode
+        except subprocess.TimeoutExpired:
+            logger.error(f"[CLI] Timeout ({timeout}s): {' '.join(args)}")
+            return f"Error: Command timed out after {timeout}s", 1
+        except Exception as e:
+            logger.error(f"[CLI] Subprocess error: {e}")
+            return f"Error: {e}", 1
 
     def _ok(self, payload: Any) -> dict:
         return {"success": True, "payload": payload, "error": None}
@@ -382,7 +451,12 @@ class ObsidianCLI:
     # ─── Tool 5: list_obsidian_vaults ────────────────────────────────────────
 
     def list_obsidian_vaults(self) -> dict:
-        """List all known vaults. Returns name + path for each."""
+        """List all known vaults. Returns name + path for each.
+        On macOS the GUI binary cannot serve CLI commands, so reads directly from obsidian.json.
+        """
+        if platform.system() == "Darwin":
+            return self._list_vaults_from_config()
+
         out, code = self._run_global("vaults", "verbose")
         if self._is_error(out, code):
             return self._err(out or "Could not list vaults")
@@ -396,6 +470,36 @@ class ObsidianCLI:
                 vaults.append({"name": parts[0], "path": "", "id": parts[0]})
 
         return self._ok({"vaults": vaults, "totalVaults": len(vaults)})
+
+    def _list_vaults_from_config(self) -> dict:
+        """Read vault list from Obsidian's local config file (macOS path).
+        obsidian.json structure: {"vaults": {"<uuid>": {"path": "...", "ts": ...}}}
+        """
+        config_path = os.path.expanduser(
+            "~/Library/Application Support/obsidian/obsidian.json"
+        )
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                data = json.load(f)
+            vaults = [
+                {
+                    "name": os.path.basename(v["path"]),
+                    "path": v["path"],
+                    # Use vault NAME (not UUID) as id — CLI commands use vault=<name>,
+                    # and vault_id is passed directly to _run(). UUID breaks CLI calls.
+                    "id": os.path.basename(v["path"]),
+                }
+                for vid, v in data.get("vaults", {}).items()
+                if "path" in v
+            ]
+            return self._ok({"vaults": vaults, "totalVaults": len(vaults)})
+        except FileNotFoundError:
+            return self._err(
+                "obsidian.json not found — is Obsidian installed?",
+                "VAULT_CONFIG_NOT_FOUND",
+            )
+        except Exception as e:
+            return self._err(f"Could not read vault config: {e}", "VAULT_CONFIG_READ_ERROR")
 
     # ─── Tool 6: explore_vault_folders ───────────────────────────────────────
 

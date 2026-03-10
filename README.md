@@ -4,7 +4,7 @@
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-[![Version](https://img.shields.io/badge/version-1.3.4-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
@@ -31,6 +31,10 @@ Define your own entity types, edge types, and property descriptions. Generate Py
 ### ⚡ Obsidian CLI Integration
 
 All 9 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter.
+
+### 🌐 Streamable HTTP MCP Transport _(new in v1.4.0)_
+
+Connect **Roo Code, Cursor, and any HTTP-capable MCP client** directly to MegaMem — no Claude Desktop required. Enable the opt-in Streamable HTTP server (MCP spec 2025-03-26) in Plugin Settings → Servers. The plugin auto-starts a dedicated HTTP process on port `3838` with Bearer token auth. All 19 tools are available over HTTP. Claude Desktop stdio is completely unchanged.
 
 ### 🔄 Intelligent Sync
 
@@ -164,8 +168,9 @@ Plugin Settings → API Keys → enter your key. Click **"Load Defaults"** to po
 **Step 4 — Connect the database**
 Plugin Settings → Database Configuration → enter your connection details → **"Test Connection"** → **"Initialize Schema"**.
 
-**Step 5 — Generate your MCP config**
-Plugin Settings → Servers → **"Generate Config"** → copy the JSON → paste into `claude_desktop_config.json` → restart Claude Desktop.
+**Step 5 — Connect your MCP client**
+- **Claude Desktop (stdio):** Plugin Settings → Servers → **"Generate Config"** → paste into `claude_desktop_config.json` → restart Claude Desktop.
+- **Roo Code / Cursor (HTTP):** Plugin Settings → Servers → Streamable HTTP → enable toggle → **"Copy MCP Config"** → paste into your client's MCP config. No Claude Desktop needed.
 
 **Step 6 — (Optional) Configure sync**
 Set included/excluded folders, choose sync mode (new only vs. new + updated), set auto-sync interval.

@@ -1,6 +1,6 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2026-03-07
+date_updated: 2026-03-10
 ---
 # MegaMem Plugin Settings
 
@@ -386,6 +386,21 @@ MCP server and connection configuration.
 ### MCP Configuration
 #### Actions:
 - **Generate Config** <i data-lucide="file-text"></i>: Generate configuration for MCP clients to connect to the MCP server
+
+### Streamable HTTP Transport <i data-lucide="check-circle"></i>
+- Description: Opt-in HTTP transport (MCP spec 2025-03-26) that lets Roo Code, Cursor, and other HTTP-capable MCP clients connect directly to MegaMem — without Claude Desktop as a relay.
+- Developer Note: Plugin auto-starts a dedicated HTTP-only process at `/mcp` on port 3838 with Bearer token auth. Claude Desktop stdio process is unchanged. `stateless=True` + `json_response=True` for Roo Code compatibility.
+
+#### Settings:
+- **Enable Streamable HTTP** — Toggle to start/stop the HTTP MCP server alongside the plugin
+- **Port** — Default `3838`. Change if the port is already in use on your machine.
+- **Auth Token** — Auto-generated Bearer token. Copy it into your MCP client config.
+
+#### Actions:
+- **Copy Token** <i data-lucide="copy"></i>: Copy Bearer auth token to clipboard
+- **Regenerate Token** <i data-lucide="refresh-cw"></i>: Generate a new random auth token (old token is immediately invalidated)
+- **Copy MCP Config** <i data-lucide="file-text"></i>: Copy a ready-to-paste `mcpServers` config block (`type: streamable-http`) for Roo Code / Cursor
+- **Start / Stop** <i data-lucide="play"></i>: Manually start or stop the HTTP server process
 
 ## Advanced Settings <i data-lucide="settings"></i>
 

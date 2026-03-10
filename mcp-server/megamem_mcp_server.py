@@ -11,6 +11,8 @@ import os
 import logging
 import json
 import asyncio
+import argparse
+import contextlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import socket
@@ -1015,7 +1017,7 @@ WORKFLOW:
                     }))]
 
             elif name == "add_conversation_memory":
-                # @purpose: Store conversation using Graphiti message format @depends: conversation array @results: Formatted episode in graph
+                # @purpose: Store conversation using Graphiti message format @depends: conversation array @results: Formatted episode queued for background processing
                 conversation = arguments.get("conversation")
                 if not conversation or not isinstance(conversation, list):
                     return [types.TextContent(type="text", text=json.dumps({
@@ -1029,59 +1031,62 @@ WORKFLOW:
                     role = msg.get("role", "unknown")
                     content = msg.get("content", "")
                     timestamp = msg.get("timestamp")
-                    
+
                     if not timestamp:
                         timestamp = datetime.now(timezone.utc).isoformat()
-                    
+
                     formatted_lines.append(f"[{timestamp}] {role}: {content}")
-                
+
                 episode_body = "\n".join(formatted_lines)
-                
+
                 # Generate name if not provided
                 name_param = arguments.get("name")
                 if not name_param:
                     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
                     name_param = f"Conversation_{timestamp}"
-                
+
                 # Get group_id or use default
                 group_id = arguments.get("group_id") or self.bridge_config.default_namespace
-                
+
                 # Get source_description
                 source_description = arguments.get("source_description", "Conversation memory from MCP")
-                
-                # Read config for custom ontology
-                config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
-                if not config_path:
-                    return [types.TextContent(type="text", text=json.dumps({
-                        "success": False,
-                        "error": "OBSIDIAN_CONFIG_PATH not set"
-                    }))]
-                
-                with open(config_path, 'r') as f:
-                    obsidian_config = json.load(f)
-                
-                entity_types = {}
-                if obsidian_config.get('useCustomOntology'):
-                    entity_types = get_entity_types_with_config(obsidian_config)
-                
-                # Add episode with message source type
-                episode_kwargs = {
-                    'name': name_param,
-                    'episode_body': episode_body,
-                    'source': EpisodeType.message,
-                    'source_description': source_description,
-                    'group_id': group_id,
-                    'reference_time': datetime.now(timezone.utc),
-                    'entity_types': entity_types
-                }
-                
-                result = await self.megamem_client.add_episode(**episode_kwargs)
-                
+
+                async def process_episode():
+                    config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
+                    if not config_path:
+                        raise ValueError("OBSIDIAN_CONFIG_PATH not set")
+
+                    with open(config_path, 'r') as f:
+                        obsidian_config = json.load(f)
+
+                    entity_types = {}
+                    if obsidian_config.get('useCustomOntology'):
+                        entity_types = get_entity_types_with_config(obsidian_config)
+
+                    episode_kwargs = {
+                        'name': name_param,
+                        'episode_body': episode_body,
+                        'source': EpisodeType.text,
+                        'source_description': source_description,
+                        'group_id': group_id,
+                        'reference_time': datetime.now(timezone.utc),
+                        'entity_types': entity_types
+                    }
+                    await self.megamem_client.add_episode(**episode_kwargs)
+
+                # Queue management
+                if group_id not in self.episode_queues:
+                    self.episode_queues[group_id] = asyncio.Queue()
+
+                position = self.episode_queues[group_id].qsize() + 1
+                await self.episode_queues[group_id].put(process_episode)
+
+                if not self.queue_workers.get(group_id, False):
+                    asyncio.create_task(self.process_episode_queue(group_id))
+
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
-                    "episode_id": str(result.episode.uuid),
-                    "message": "Conversation memory added successfully",
-                    "message_count": len(conversation)
+                    "message": f"Episode queued (position: {position})"
                 }))]
 
             else:
@@ -1370,7 +1375,8 @@ WORKFLOW:
             logger.error(f"[BACKGROUND] Resource loading failed: {e}", exc_info=True)
             self.initialization_complete = True
             self.ready_event.set()
-            raise
+            # Do NOT re-raise — this is a fire-and-forget asyncio task; raising propagates
+            # into anyio's TaskGroup inside stdio_server() and crashes the entire MCP server.
 
     # @vessel-protocol:Heimdall governs:discovery context:Server discovery with integrated auto-launch for seamless user experience
     # @inter-dependencies: [RemoteRPCBridge, WebSocketServer, FileTools, aiohttp, obsidian auto-launch]
@@ -1899,15 +1905,81 @@ WORKFLOW:
 # --- Main Entry Point ---
 
 
-async def main():
-    """Main entry point for the complete MCP server with 18 tools"""
-    try:
-        # Create and initialize the server
-        mcp_server = ObsidianMegaMemMCPServer()
-        await mcp_server.initialize()
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments. All args are optional — no args = stdio mode (original behavior)."""
+    parser = argparse.ArgumentParser(description='MegaMem MCP Server')
+    parser.add_argument(
+        '--streamable-http', action='store_true',
+        help='Run as Streamable HTTP server (MCP spec 2025-03-26). Plugin-spawned process only.'
+    )
+    parser.add_argument('--port', type=int, default=3838, help='HTTP server port (default: 3838)')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='HTTP server host (default: 127.0.0.1)')
+    parser.add_argument('--auth-token', type=str, default='', dest='auth_token',
+                        help='Bearer auth token (required with --streamable-http)')
+    return parser.parse_args()
 
-        # Run the MCP server using stdio transport
+
+async def _run_http_server(mcp_server: 'ObsidianMegaMemMCPServer', host: str, port: int, auth_token: str) -> None:
+    """Run MCP as Streamable HTTP with Bearer auth. Plugin-spawned process only."""
+    try:
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import Response
+        from starlette.routing import Mount
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        import uvicorn
+    except ImportError as e:
+        logger.critical(f"[HTTP] Missing dependency: {e}. Run: pip install starlette uvicorn mcp>=1.6.0")
+        sys.exit(1)
+
+    # stateless=True + json_response=True: each POST is self-contained, returns JSON immediately
+    # No persistent SSE stream — compatible with Roo Code and all standard HTTP MCP clients
+    session_manager = StreamableHTTPSessionManager(
+        app=mcp_server.server,
+        event_store=None,
+        json_response=True,
+        stateless=True,
+    )
+
+    class BearerAuthMiddleware(BaseHTTPMiddleware):
+        # @purpose: Reject all requests missing or with wrong Bearer token @depends: auth_token @results: 401 on failure
+        async def dispatch(self, request, call_next):
+            auth = request.headers.get('Authorization', '')
+            if not auth.startswith('Bearer ') or auth[7:] != auth_token:
+                return Response('Unauthorized', status_code=401)
+            return await call_next(request)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with session_manager.run():
+            logger.info(f"[HTTP] MegaMem MCP server ready — http://{host}:{port}/mcp")
+            yield
+
+    starlette_app = Starlette(
+        lifespan=lifespan,
+        routes=[Mount('/mcp', app=session_manager.handle_request)],
+        middleware=[Middleware(BearerAuthMiddleware)],
+    )
+
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level='info')
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def _main_stdio() -> None:
+    """Run MCP server over stdio — Claude Desktop / original behavior.
+    Transport opens FIRST so tools/list responds immediately.
+    initialize() runs as a background task after the transport is ready.
+    """
+    try:
+        mcp_server = ObsidianMegaMemMCPServer()
         async with stdio_server() as (read_stream, write_stream):
+            # Start initialize() in the background AFTER transport is open.
+            # Claude Desktop can now handle tools/list instantly while Neo4j/CLI
+            # init proceeds asynchronously. ready_event + initialization_complete
+            # gate any tool calls that need Graphiti.
+            asyncio.create_task(mcp_server.initialize())
             await mcp_server.server.run(
                 read_stream,
                 write_stream,
@@ -1917,5 +1989,20 @@ async def main():
         logger.critical(f"Failed to start MCP server: {e}", exc_info=True)
         sys.exit(1)
 
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    args = parse_args()
+
+    if args.streamable_http:
+        if not args.auth_token:
+            print('[ERROR] --auth-token is required when using --streamable-http', file=sys.stderr)
+            sys.exit(1)
+
+        async def _run_http():
+            mcp_server = ObsidianMegaMemMCPServer()
+            await mcp_server.initialize()
+            await _run_http_server(mcp_server, args.host, args.port, args.auth_token)
+
+        asyncio.run(_run_http())
+    else:
+        asyncio.run(_main_stdio())
