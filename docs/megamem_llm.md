@@ -940,7 +940,7 @@ Required parameters vary by mode:
 | `path`                | `string`  | Note path                                                                                   | Yes      |             |
 | `editing_mode`        | `string`  | The editing mode to use                                                                     | No       | `full_file` |
 | `content`             | `string`  | New content (used for full_file mode)                                                       | No       |             |
-| `frontmatter_changes` | `object`  | Object containing frontmatter properties to update (used for frontmatter_only mode)         | No       |             |
+| `frontmatter_changes` | `object`  | Object containing frontmatter properties to update (used for frontmatter_only mode). **WARNING:** Do NOT pass array values (e.g. `tags`) via `frontmatter_changes` — the YAML serializer will drop the closing `---` fence, corrupting the file. For any update that includes array fields, use `full_file` mode instead. | No       |             |
 | `append_content`      | `string`  | Content to append to the end of the file (used for append_only mode)                        | No       |             |
 | `replacement_content` | `string`  | Content to replace within the specified range (used for range_based mode)                   | No       |             |
 | `range_start_line`    | `integer` | Starting line number (1-based) for range replacement                                        | No       |             |
@@ -992,6 +992,12 @@ INTELLIGENT ROUTING:
 - TPL ProjectDoc: Route to project subfolders (01_Planning/, 02_Development/, etc.) based on context
 - Entity templates: Auto-route to 04_Entities/[type]/ folders
 - Parse natural language: "create project for X called Y" or "create planning doc for Z"
+
+SERVER-SIDE FOLDER RESOLUTION (when `target_folder` is omitted):
+
+1. **Templater mapping** — checks `folder_templates` in Templater plugin settings; fuzzy-matches template basename
+2. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
+3. **Vault root** — final fallback if no mapping and no inboxFolder configured
 
 WORKFLOW:
 

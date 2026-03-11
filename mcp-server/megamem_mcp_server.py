@@ -449,7 +449,7 @@ Example: To edit line 38, first call read_obsidian_note with include_line_map=tr
                         "content": {"type": "string", "description": "New content (used for full_file mode)"},
                         "frontmatter_changes": {
                             "type": "object",
-                            "description": "Object containing frontmatter properties to update (used for frontmatter_only mode)"
+                            "description": "Object containing frontmatter properties to update (used for frontmatter_only mode). WARNING: Do NOT pass array values (e.g. tags) via frontmatter_changes — the YAML serializer will drop the closing --- fence, corrupting the file. For any update that includes array fields, use full_file mode instead."
                         },
                         "append_content": {
                             "type": "string",
