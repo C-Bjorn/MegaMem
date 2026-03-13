@@ -139,6 +139,8 @@ class ObsidianMegaMemMCPServer:
         self.bridge_config = None
         self.vault_resolver = VaultResolver()
         self.ws_port = None  # Store port for error messages
+        # Per-DB Graphiti client cache (database_id → Graphiti instance)
+        self._db_clients: Dict[str, Any] = {}
         
         # @purpose: Async initialization state tracking @depends: asyncio.Event @results: Fast MCP startup with background loading
         self.initialization_complete = False
@@ -227,7 +229,8 @@ class ObsidianMegaMemMCPServer:
                         "source_description": {"type": "string", "description": "Description of the source"},
                         "group_id": {"type": "string", "description": "Group ID for organizing memories"},
                         "uuid": {"type": "string", "description": "Optional UUID for the episode"},
-                        "namespace": {"type": "string", "description": "DEPRECATED: Use group_id instead", "default": "megamem-vault"}
+                        "namespace": {"type": "string", "description": "DEPRECATED: Use group_id instead", "default": "megamem-vault"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                     },
                     "required": ["name", "content"]
                 }
@@ -244,7 +247,8 @@ class ObsidianMegaMemMCPServer:
                         "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"},
                         "entity_types": {"type": "array", "items": {"type": "string"}, "description": "Filter by entity types (e.g., ['Person', 'Company'])"},
                         "node_labels": {"type": "array", "items": {"type": "string"}, "description": "Filter by node label types (e.g. ['Person', 'Organization'])"},
-                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"}
+                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label). e.g. 'notes-vault', 'CompanyName Graph'"}
                     },
                     "required": ["query"]
                 }
@@ -260,10 +264,16 @@ class ObsidianMegaMemMCPServer:
                         "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to search in"},
                         "center_node_uuid": {"type": "string", "description": "UUID of node to center search around (proximity search)"},
                         "node_labels": {"type": "array", "items": {"type": "string"}, "description": "Filter by node label types (e.g. ['Person', 'Organization'])"},
-                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"}
+                        "property_filters": {"type": "object", "description": "Filter by specific node/edge properties (e.g. {\"status\": \"active\"})"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label)"}
                     },
                     "required": ["query"]
                 }
+            ),
+            Tool(
+                name="list_databases",
+                description="List all configured database targets. Use this to discover which databases are available before querying with database_id. (aliases: mm, megamem, memory)",
+                inputSchema={"type": "object", "properties": {}}
             ),
             Tool(
                 name="get_episodes",
@@ -400,42 +410,7 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="update_obsidian_note",
-                description="""Update content of an existing note using various editing modes (aliases: mv, my vault, obsidian).
-
-Editing Modes:
-- full_file: Replace entire file content (default)
-- frontmatter_only: Update only YAML frontmatter properties
-- append_only: Append content to end of file
-- range_based: Replace content within specific line ranges
-- editor_based: Use predefined editor methods
-
-Required parameters vary by mode:
-- full_file: path, content
-- frontmatter_only: path, frontmatter_changes
-- append_only: path, append_content
-- range_based: path, replacement_content, range_start_line, range_start_char
-- editor_based: path, editor_method (plus method-specific parameters)
-
-MANDATORY WORKFLOW FOR range_based MODE:
-Before using range_based editing, you MUST follow this exact sequence:
-
-1. Call read_obsidian_note WITH include_line_map=true to get line numbers
-2. Use the returned metadata.lineMap to identify exact line positions
-3. Verify the target content matches your intent
-4. Execute the range_based edit with verified line numbers
-
-The include_line_map parameter returns:
-- metadata.lineMap: {"1": "line content", "2": "line content", ...}
-- metadata.sections: [{name: "frontmatter", startLine: 1, endLine: 5}, {name: "body", startLine: 6, endLine: 100}]
-- metadata.totalLines: total line count
-
-Critical reminders:
-- NEVER attempt range_based editing without first reading with include_line_map=true
-- Use lineMap to verify exact content at each line number
-- Blank lines and frontmatter are included in line numbers
-- The lineMap eliminates manual counting errors
-
-Example: To edit line 38, first call read_obsidian_note with include_line_map=true, then check metadata.lineMap["38"] to verify content, then specify range_start_line=38.""",
+                description="Update content of an existing note using various editing modes: full_file, frontmatter_only, append_only, range_based, editor_based (aliases: mv, my vault, obsidian, update note, edit note). For range_based mode, always call read_obsidian_note with include_line_map=true first to get exact line numbers.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -765,7 +740,34 @@ WORKFLOW:
                     "message": f"Episode queued (position: {position})"
                 }))]
 
+            elif name == "list_databases":
+                try:
+                    obsidian_config = self._load_obsidian_config()
+                    databases = obsidian_config.get('databases', [])
+                    result = []
+                    for db in databases:
+                        result.append({
+                            'id': db.get('id'),
+                            'label': db.get('label'),
+                            'type': db.get('type'),
+                            'category': db.get('category'),
+                            'enabled': db.get('enabled', True),
+                            'vault_id': db.get('vaultId'),
+                            'connection': (db.get('uri') or f"{db.get('host', 'localhost')}:{db.get('port', 6379)}")
+                        })
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": True,
+                        "databases": result,
+                        "count": len(result)
+                    }))]
+                except Exception as e:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False, "error": str(e)
+                    }))]
+
             elif name == "search_memory_nodes":
+                database_id = arguments.get('database_id')
+                client = await self._get_graphiti_client(database_id)
                 group_ids = arguments.get('group_ids') or [
                     self.bridge_config.default_namespace]
                 max_nodes = arguments.get("max_nodes", 10)
@@ -788,7 +790,7 @@ WORKFLOW:
                 if property_filters:
                     filters.property_filters = property_filters
 
-                results = await self.megamem_client._search(
+                results = await client._search(
                     query=arguments["query"],
                     config=search_config,
                     group_ids=group_ids,
@@ -808,10 +810,13 @@ WORKFLOW:
 
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
-                    "results": formatted_nodes
+                    "results": formatted_nodes,
+                    **({"database": database_id} if database_id else {})
                 }))]
 
             elif name == "search_memory_facts":
+                database_id = arguments.get('database_id')
+                client = await self._get_graphiti_client(database_id)
                 group_ids = arguments.get('group_ids') or [
                     self.bridge_config.default_namespace]
                 max_facts = arguments.get("max_facts", 10)
@@ -831,7 +836,7 @@ WORKFLOW:
                 if fact_property_filters:
                     fact_filters.property_filters = fact_property_filters
 
-                results = await self.megamem_client._search(
+                results = await client._search(
                     query=arguments["query"],
                     config=search_config,
                     group_ids=group_ids,
@@ -843,7 +848,8 @@ WORKFLOW:
                     edge) for edge in results.edges]
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
-                    "facts": formatted_facts
+                    "facts": formatted_facts,
+                    **({"database": database_id} if database_id else {})
                 }))]
 
             elif name == "get_episodes":
@@ -1345,15 +1351,34 @@ WORKFLOW:
                 )
                 logger.info("[BACKGROUND] Embedder health check passed")
             except Exception as embed_err:
-                self.embedder_healthy = False
-                if bridge_config.embedder_provider == 'ollama':
+                err_str = str(embed_err)
+                err_type = type(embed_err).__name__
+                # Only mark embedder unhealthy for actual connectivity failures, not Neo4j data errors
+                # e.g. dimension mismatch in stored embeddings is a data issue, not an embedder issue
+                _EMBEDDER_CONN_ERRORS = ('APIConnectionError', 'ConnectionRefusedError', 'ConnectError',
+                                         'ConnectionError', 'OllamaError', 'HTTPStatusError')
+                is_embedder_conn_err = (
+                    any(x in err_type for x in _EMBEDDER_CONN_ERRORS) or
+                    any(x in err_str for x in ('Connection refused', 'connect ECONNREFUSED',
+                                               'Failed to establish', 'ollama serve'))
+                )
+                if is_embedder_conn_err:
+                    self.embedder_healthy = False
+                    provider = bridge_config.embedder_provider
                     base_url = bridge_config.ollama_base_url or 'http://localhost:11434'
-                    logger.error(
-                        f"[EMBEDDER ERROR] Ollama is not running or unreachable at {base_url}. "
-                        "Start Ollama before using graph search tools. Run: ollama serve"
-                    )
+                    if provider == 'ollama':
+                        logger.error(
+                            f"[EMBEDDER ERROR] Ollama is not running or unreachable at {base_url}. "
+                            f"Run: ollama serve. (actual error: {embed_err})"
+                        )
+                    else:
+                        logger.error(f"[EMBEDDER ERROR] Embedder unreachable ({provider}): {embed_err}")
                 else:
-                    logger.error(f"[EMBEDDER ERROR] Embedder unreachable ({bridge_config.embedder_provider}): {embed_err}")
+                    # Neo4j/data error (e.g. dimension mismatch) — embedder is healthy, log as warning
+                    logger.warning(
+                        f"[EMBEDDER HEALTH] Health check query failed with non-embedder error "
+                        f"(embedder marked healthy): {err_type}: {embed_err}"
+                    )
 
             # Initialize DB constraints after graphiti client is ready
             logger.info("[BACKGROUND] Building database indices...")
@@ -1773,6 +1798,85 @@ WORKFLOW:
                 return result == 0
         except Exception:
             return False
+
+    def _load_obsidian_config(self) -> Dict:
+        """Load the current data.json from OBSIDIAN_CONFIG_PATH"""
+        config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
+        if not config_path:
+            raise ValueError("OBSIDIAN_CONFIG_PATH not set")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    def _resolve_database_config(self, database_id: str, obsidian_config: Dict) -> Optional[Dict]:
+        """Find a named DbConfig from databases[] by id or label (case-insensitive label match)
+        @purpose: Multi-DB routing — maps user-friendly database_id to connection config"""
+        databases = obsidian_config.get('databases', [])
+        # Exact id match first
+        for db in databases:
+            if db.get('id') == database_id:
+                return db
+        # Fuzzy label match
+        database_id_lower = database_id.lower()
+        for db in databases:
+            if db.get('label', '').lower() == database_id_lower:
+                return db
+        return None
+
+    def _create_bridge_config_for_db(self, db_config: Dict, obsidian_config: Dict) -> 'BridgeConfig':
+        """Build a BridgeConfig from a named DbConfig entry (for per-DB client creation)"""
+        config_path = os.environ.get('OBSIDIAN_CONFIG_PATH', '')
+        db_type = db_config.get('type', 'neo4j')
+
+        if db_type == 'neo4j':
+            database_url = db_config.get('uri', 'bolt://localhost:7687')
+        else:
+            host = db_config.get('host', 'localhost')
+            port = db_config.get('port', 6379)
+            database_url = f'bolt://{host}:{port}'
+
+        # Embedding: per-DB override → global fallback
+        embed_provider = db_config.get('embedderProvider') or obsidian_config.get('embedderProvider', 'openai')
+        embed_model = db_config.get('embeddingModel') or obsidian_config.get('embeddingModel', 'text-embedding-3-small')
+
+        return BridgeConfig(
+            llm_provider=obsidian_config.get('llmProvider', 'openai'),
+            llm_model=obsidian_config.get('llmModel', 'gpt-4o'),
+            embedder_provider=embed_provider,
+            embedding_model=embed_model,
+            database_type=db_type,
+            database_url=database_url,
+            database_username=db_config.get('username'),
+            database_password=db_config.get('password'),
+            database_name=db_config.get('database', 'neo4j'),
+            default_namespace=obsidian_config.get('defaultNamespace', 'default'),
+            use_custom_ontology=obsidian_config.get('useCustomOntology', False),
+            api_keys=obsidian_config.get('apiKeys', {}),
+            models_path=str(Path(config_path).parent) if config_path else '',
+            notes=[],
+            debug=False
+        )
+
+    async def _get_graphiti_client(self, database_id: Optional[str] = None) -> Any:
+        """Return the Graphiti client for a specific database; falls back to default client
+        @purpose: Per-DB routing for search/add operations @results: Cached or newly created Graphiti instance"""
+        if not database_id:
+            return self.megamem_client
+
+        # Return cached instance if available
+        if database_id in self._db_clients:
+            return self._db_clients[database_id]
+
+        obsidian_config = self._load_obsidian_config()
+        db_config = self._resolve_database_config(database_id, obsidian_config)
+        if not db_config:
+            raise ValueError(f"Database '{database_id}' not found in configured databases. Use list_databases() to see available options.")
+
+        bridge_cfg = self._create_bridge_config_for_db(db_config, obsidian_config)
+        setup_environment_variables(bridge_cfg)
+        client = await init_megamem_bridge(bridge_cfg, debug=False)
+        self._db_clients[database_id] = client
+        logger.info(f"[DB-ROUTING] Initialized Graphiti client for database '{database_id}' ({db_config.get('label')})")
+        return client
 
     def _create_bridge_config(self, obsidian_config: Dict, config_path: str) -> BridgeConfig:
         """Create BridgeConfig from Obsidian config"""

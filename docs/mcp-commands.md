@@ -1,10 +1,10 @@
 ---
 date_created: 2025-09-23T18:03
-date_updated: 2025-09-28T11:36
+date_updated: 2026-03-13T00:00
 ---
 # MCP Commands Reference
 
-This document lists all 19 available commands (tools) provided by the MegaMem MCP server: 10 MegaMem Graph Operations and 9 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 20 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 9 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -25,6 +25,7 @@ Add a memory/episode to the graph (aliases: mm, megamem, memory)
 | `group_id` | `string` | Group ID for organizing memories | No | |
 | `uuid` | `string` | Optional UUID for the episode | No | |
 | `namespace` | `string` | DEPRECATED: Use group_id instead | No | `megamem-vault` |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No | |
 
 ### `add_conversation_memory`
 
@@ -80,6 +81,7 @@ Search for nodes in the memory graph (aliases: mm, megamem, memory)
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
 | `node_labels` | `array` | Filter results to nodes with specific label types (e.g. `["Person", "Organization"]`) | No | |
 | `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"status": "active"}`) | No | |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No | |
 
 ### `search_memory_facts`
 
@@ -94,6 +96,7 @@ Search for facts/relationships in the memory graph (aliases: mm, megamem, memory
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
 | `node_labels` | `array` | Filter by node label types (e.g. `["Person", "Organization"]`) | No | |
 | `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"group_id": "Journal"}`) | No | |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No | |
 
 ### `get_episodes`
 
@@ -142,6 +145,16 @@ Delete an episode from the graph (aliases: mm, megamem, memory)
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
 | `episode_id` | `string` | Episode ID to delete | Yes | |
+
+### `list_databases`
+
+List all configured database targets. Use this to discover which databases are available before querying with `database_id`. (aliases: mm, megamem, memory)
+
+**Parameters:** None
+
+**Returns:** Array of `{ id, label, category, type, connection_info_public }` — one entry per configured database in plugin settings.
+
+> **Tip for AI assistants:** Call `list_databases` first when the user refers to a specific vault, project, or database by name. Use the returned `id` to route subsequent queries via the `database_id` parameter.
 
 ### `list_group_ids`
 

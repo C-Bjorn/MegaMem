@@ -4,7 +4,7 @@
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
@@ -20,9 +20,13 @@ Sync your Obsidian notes to a graph database. Entities become nodes, relationshi
 
 The plugin scans your vault's frontmatter and automatically infers entity types, property types, and relationships. No manual schema definition required. Write your notes, the schema emerges.
 
-### 🤖 19 MCP Tools for AI Assistants
+### 🌐 Multi-Database & Multi-Vault _(new in v1.5.0)_
 
-A full MCP server (10 graph tools + 9 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
+Configure multiple named graph databases simultaneously — each with its own connection, type (Neo4j/FalkorDB), and embedding model. A **masterVault** runs the MCP server and manages all databases across all registered vaults. Tell Claude which database to query, or let it discover available databases with `list_databases`.
+
+### 🤖 20 MCP Tools for AI Assistants
+
+A full MCP server (11 graph tools + 9 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
 
 ### 🏗️ Custom Ontology Manager
 
@@ -58,22 +62,23 @@ MegaMem is **stable in daily production use** and currently in public beta. We'r
 
 ## 🛠️ MCP Tools Reference
 
-All 19 tools are available to Claude Desktop and any MCP-compatible client.
+All 20 tools are available to Claude Desktop and any MCP-compatible client.
 
-### Graph Operations (10)
+### Graph Operations (11)
 
-| Tool                      | Description                                         |
-| ------------------------- | --------------------------------------------------- |
-| `add_memory`              | Add an episode/memory to the knowledge graph        |
-| `add_conversation_memory` | Store a conversation as a structured memory episode |
-| `search_memory_nodes`     | Semantic search for entity nodes in the graph       |
-| `search_memory_facts`     | Search for relationships and facts between entities |
-| `get_episodes`            | Retrieve the most recent N episodes from a group    |
-| `get_entity_edge`         | Get relationships for a specific entity by name     |
-| `delete_entity_edge`      | Remove a specific relationship edge by UUID         |
-| `delete_episode`          | Remove a specific episode by ID                     |
-| `list_group_ids`          | List all group IDs (namespaces) in the vault        |
-| `clear_graph`             | Clear the entire memory graph (use with caution)    |
+| Tool                      | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `add_memory`              | Add an episode/memory to the knowledge graph (`database_id` optional)       |
+| `add_conversation_memory` | Store a conversation as a structured memory episode                         |
+| `search_memory_nodes`     | Semantic search for entity nodes in the graph (`database_id` optional)      |
+| `search_memory_facts`     | Search for relationships and facts between entities (`database_id` optional) |
+| `get_episodes`            | Retrieve the most recent N episodes from a group                            |
+| `get_entity_edge`         | Get relationships for a specific entity by name                             |
+| `delete_entity_edge`      | Remove a specific relationship edge by UUID                                 |
+| `delete_episode`          | Remove a specific episode by ID                                             |
+| `list_group_ids`          | List all group IDs (namespaces) in the vault                                |
+| `list_databases`          | List all configured database targets — use before routing with `database_id` |
+| `clear_graph`             | Clear the entire memory graph (use with caution)                            |
 
 ### Obsidian File Operations (9) — via Obsidian CLI
 
@@ -89,7 +94,7 @@ All 19 tools are available to Claude Desktop and any MCP-compatible client.
 | `manage_obsidian_folders`   | Create, rename, or delete vault folders                                |
 | `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)             |
 
-> Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands)
+> Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — Updated for v1.5 with `database_id` routing on all graph tools.
 
 ---
 
@@ -234,8 +239,10 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 ### Shipped ✅
 
+- **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
+- **Multi-vault architecture** — masterVault control panel, childVault registration, MCP `database_id` routing, `list_databases` tool _(v1.5)_
 - Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
-- 19 MCP tools — 10 graph operations + 9 Obsidian file tools
+- 20 MCP tools — 11 graph operations + 9 Obsidian file tools
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation
@@ -264,7 +271,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 MegaMem embraces **progressive formalization**: start with plain notes, let patterns emerge naturally, then add structure as your knowledge matures. The graph enriches your vault — it doesn't replace the way you write.
 
-> _Gate services, not tools._ All 19 MCP tools are free. Forever.
+> _Gate services, not tools._ All 20 MCP tools are free. Forever.
 
 ---
 

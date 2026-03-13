@@ -34,8 +34,16 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 
 - **Neo4j**: Industry-standard graph database for complex relationships
 - **FalkorDB**: High-performance in-memory graph database for speed
+- **Multiple simultaneous databases**: Configure named DB targets, each with its own connection, type, and embedding model. Sync individual notes to any database via a per-note dropdown.
 - **Kuzu**: Coming soon
 - **Amazon Neptune**: Coming soon
+
+### Multi-Vault Architecture _(v1.5)_
+
+- **masterVault**: One vault runs the MCP server and manages a unified database control panel for all vaults
+- **childVault registration**: Register other Obsidian vaults via auto-discovery; their DB configs appear in the master's database list
+- **MCP database routing**: All graph tools accept an optional `database_id` parameter to target a specific database
+- **`list_databases` tool**: Let your AI assistant discover all configured database targets before running queries
 
 ### LLM Client Integration (ie. Claude Desktop)
 
@@ -1441,8 +1449,9 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 - **Constrained Ontology Generation Pipeline**: Redesigned `Generate Complete Ontology` with reuse-first batch prompts, `maxTotalEdgeTypes` cap (default: 25), and post-generation consolidation pass to prevent edge type proliferation.
 - **Schema Manager Cleanup Buttons**: Added 🗑️ Cleanup modals to all four Ontology Manager tabs for removing stale schema entries.
 - **Core Plugin Foundation**: Implemented an Obsidian plugin using TypeScript/Svelte, featuring automatic schema discovery by scanning vault patterns and removing manual YAML configuration.
-- **Multi-Database Support**: Achieved compatibility with Neo4j and FalkorDB, offering 18 distinct configurations combining various LLM and embedding provider setups.
-- **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 10 Graphiti tools for direct graph interaction and 9 Obsidian file management tools.
+- **Multi-Database Support** *(v1.5)*: Users configure multiple named databases simultaneously. Each `DbConfig` entry carries its own label, type, connection, and embedding provider/model. Per-note sync icon dropdown selects target DB. `sync.json` tracks per-DB sync state. Existing configs auto-migrate to `databases[0]`.
+- **Multi-Vault Architecture** *(v1.5)*: masterVault manages all databases across registered vaults. MCP tools gain optional `database_id` routing parameter. New `list_databases()` tool. childVault registration via OS `obsidian.json` auto-discovery. All routing operations confirmed in post-implementation test.
+- **Comprehensive MCP Server**: Rebuilt the MCP (Model Context Protocol) server from scratch, now providing 11 Graphiti tools for direct graph interaction and 9 Obsidian file management tools.
 - **Obsidian CLI Integration**: Migrated all 9 Obsidian file operation tools from a fragile WebSocket layer to stateless Obsidian CLI subprocess calls (v1.12+). Eliminates startup connection races, ERR_CONNECTION_RESET errors, and WebSocket contention between multiple MCP clients. Multi-vault targeting is a single `vault=` parameter — no persistent registry or heartbeat required.
 - **Custom Ontology Integration**: Enabled custom ontology support with full Pydantic model generation, enhancing flexible data modeling.
 - **FalkorDB Integration**: Successfully integrated FalkorDB, thoroughly resolving RediSearch compatibility challenges.

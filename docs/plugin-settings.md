@@ -1,6 +1,6 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2026-03-10
+date_updated: 2026-03-13
 ---
 # MegaMem Plugin Settings
 
@@ -152,13 +152,13 @@ Configure language model providers and specific models.
 - **Test LLM Connection** <i data-lucide="zap"></i>: Test your language model provider configuration
 
 ### Embedding Provider <i data-lucide="check-circle"></i>
-- Description: Choose your embedding provider
+- Description: Choose your embedding provider (global default — now overridable per-database)
 - Options: OpenAI, Google AI, Voyage AI, Ollama (Local)
-- Developer Note: All providers implemented with automatic vault registry updates. **IMPORTANT**: Each database can only support one embedder config. If you change it later - all things will break. *In the future, MegaMem plans to support multiple databases with multiple configs.*
+- Developer Note: Legacy global setting. As of v1.5, embedding is configured per-DB in the Database accordion. This field remains as a fallback for users with a single database.
 
 ### Embedding Model <i data-lucide="check-circle"></i>
-- Description: Model for generating embeddings
-- Developer Note: Includes embedding model change detection and database conflict warnings.
+- Description: Model for generating embeddings (global default)
+- Developer Note: Legacy global setting — now overridable per-database in the Databases section.
 
 ### Custom LLM Model (Ollama only) <i data-lucide="check-circle"></i>
 - Description: Download any Ollama LLM model by name (e.g., llama3.2:3b, codellama:13b)
@@ -187,53 +187,47 @@ Configure language model providers and specific models.
 
 ## Database Configuration
 
-Configure your graph database backend.
+Configure your graph database backend(s). As of **v1.5**, MegaMem supports multiple named databases simultaneously.
 
-### Database Type <i data-lucide="check-circle"></i>
-- Description: Choose your graph database backend
-- Options: Neo4j, FalkorDB
-- Developer Note: Neo4j fully tested with latest. FalkorDB - not tested in a while, proceed with caution.
+### Databases List <i data-lucide="check-circle"></i>
 
-### Neo4j URI <i data-lucide="check-circle"></i>
-- Description: Neo4j connection URI (e.g., bolt://localhost:7687)
-- Developer Note: Standard Neo4j bolt protocol connection.
+The "Databases" accordion shows all configured database targets. Each entry collapses to a summary row and expands to a full edit form.
 
-### Neo4j Username <i data-lucide="check-circle"></i>
-- Description: Neo4j database username
-- Developer Note: Authentication for Neo4j database access.
+**Summary row shows:** label, type badge (Neo4j / FalkorDB), embedding model, enabled state.
 
-### Neo4j Password <i data-lucide="check-circle"></i>
-- Description: Neo4j database password
-- Developer Note: Secure password field for Neo4j authentication.
+**Expanded edit form fields:**
+- **Label**: Human-readable name (e.g., "Personal Neo4j", "Company Graph")
+- **Type**: Neo4j or FalkorDB
+- **URI / Host / Port**: Connection coordinates
+- **Username / Password / Database Name**: Authentication
+- **Embedding Provider**: Per-database embedding provider (OpenAI, Google, Voyage, Ollama)
+- **Embedding Model**: Per-database embedding model
+- **Embedding Dimensions** *(Ollama only)*: Required when using Ollama embeddings
 
-### Neo4j Database Name <i data-lucide="check-circle"></i>
-- Description: Name of the Neo4j database to use
-- Developer Note: Use the default: "neo4j". Currently there is a bug in graphiti wherein custom db names break things.
+**Actions per entry:**
+- **Test Connection**: Verifies connection to this specific database
+- **Remove**: Deletes this database configuration
 
-### FalkorDB Host <i data-lucide="check-circle"></i>
-- Description: FalkorDB host address
-- Developer Note: Redis-compatible FalkorDB connection.
+**Add Database:** Opens an inline form to add a new database entry. Fill connection details and embedding config, then save.
 
-### FalkorDB Port <i data-lucide="check-circle"></i>
-- Description: FalkorDB port number
-- Developer Note: Configurable port with validation (1-65535).
+> **Note:** Existing single-database configs are auto-migrated to `databases[0]` on first load after upgrading to v1.5. No manual action required.
 
-### FalkorDB Username (Optional) <i data-lucide="check-circle"></i>
-- Description: FalkorDB username (leave empty if not using authentication)
-- Developer Note: Optional authentication for secured FalkorDB instances.
+### Multi-Vault Mode <i data-lucide="check-circle"></i>
 
-### FalkorDB Password (Optional) <i data-lucide="check-circle"></i>
-- Description: FalkorDB password (leave empty if not using authentication)
-- Developer Note: Optional secure password field.
+A dedicated **"Multi-Vault Mode"** accordion (separate from the Database list) controls master/child vault relationships.
 
-### FalkorDB Database Name <i data-lucide="check-circle"></i>
-- Description: Name of the FalkorDB database to use
-- Developer Note: Database name configuration for FalkorDB.
+**Master Vault toggle:** When enabled, this vault runs the MCP server and shows a "Registered Child Vaults" panel.
+
+**Registered Child Vaults** *(masterVault only)*: Lists vaults registered as children. Each entry shows vault path, linked database, and a Remove button.
+
+**Register Child Vault:** Opens a form to register another Obsidian vault. Vaults are auto-discovered from the OS Obsidian registry (`obsidian.json`) and shown in a dropdown. On registration, the child vault's DB config is read and added to the master's `databases[]` array with `category: 'child-vault'`.
+
+> **Child vault behaviour:** When a vault is registered as a child, its MCP settings show an info notice: "MCP Server is managed by masterVault." MCP is disabled in child mode.
 
 ### Database Testing and Setup
 #### Actions:
-- **Test Connection** <i data-lucide="database"></i>: Verify your database connection settings
-- **Initialize Schema** <i data-lucide="table"></i>: Set up the required Graphiti schema in your database (run this after successful connection test)
+- **Test Connection** <i data-lucide="database"></i>: Verify connection for the selected database configuration
+- **Initialize Schema** <i data-lucide="table"></i>: Set up the required Graphiti schema in your database (run after successful connection test)
 
 ## Python Environment
 
