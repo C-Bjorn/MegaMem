@@ -224,6 +224,17 @@ class CLIFileTools:
             self.cli.manage_obsidian_folders, vault, operation, folderPath, newFolderPath
         )
 
+    async def sync_obsidian_note(
+        self,
+        path: str,
+        vault_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Trigger MegaMem sync for a specific note via the registered plugin command."""
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        return await asyncio.to_thread(self.cli.trigger_sync, vault, path)
+
     # ─── Legacy method aliases (match FileTools method names called by MCP server) ──
 
     async def rename_obsidian_note(

@@ -263,6 +263,29 @@ async def main():
             logger.debug(
                 f"Graphiti initialization completed in {graphiti_init_time:.2f}s")
 
+        # Pre-sync smoke test: verify embedder dimensions match existing DB vectors
+        dim_ok, existing_dims, expected_dims = await check_dimension_compatibility(graphiti, config, logger)
+        if not dim_ok:
+            db_label = config.database_name or config.database_url or 'unknown'
+            logger.error(
+                f'[EMBEDDER-DIMENSION-MISMATCH] "{db_label}": existing vectors are {existing_dims}D '
+                f'but {config.embedder_provider}/{config.embedding_model} produces {expected_dims}D. '
+                f'Fix the embedder in MegaMem Settings \u2192 Databases.'
+            )
+            # Close graphiti cleanly before exit to suppress asyncio StreamWriter cleanup noise
+            try:
+                if hasattr(graphiti, 'close'):
+                    await graphiti.close()
+                elif hasattr(graphiti, '_driver') and graphiti._driver:
+                    await graphiti._driver.close()
+            except Exception:
+                pass
+            print_error_and_exit(
+                f'Embedder dimension mismatch in "{db_label}": DB has {existing_dims}D vectors, '
+                f'configured embedder produces {expected_dims}D. '
+                f'Fix the embedder provider/model in MegaMem Settings \u2192 Databases.'
+            )
+
         # Validate that we have exactly one note
         if len(config.notes) != 1:
             print_error_and_exit(
@@ -575,6 +598,62 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
             logger.debug(
                 f"[EMBEDDER-DEBUG] Sample embedding diagnostic failed: {e}")
     # ---- End diagnostics ----
+
+    return embedder
+
+
+async def check_dimension_compatibility(graphiti, config: 'BridgeConfig', logger) -> tuple:
+    """
+    Pre-sync smoke test: verify that the configured embedder produces vectors with the same
+    dimensions as those already stored in the database. Returns (ok, existing_dims, expected_dims).
+    Never raises — on any failure returns (True, None, None) to avoid blocking sync.
+    """
+    try:
+        # Step 1: Query DB for existing embedding dimensions
+        existing_dims = None
+        if config.database_type == 'neo4j':
+            driver = getattr(graphiti, '_driver', None) or getattr(graphiti, 'driver', None)
+            if driver:
+                try:
+                    query = (
+                        "MATCH (n:Entity) WHERE n.name_embedding IS NOT NULL "
+                        "RETURN size(n.name_embedding) AS dims LIMIT 1"
+                    )
+                    async with driver.session(database=config.database_name) as session:
+                        result = await session.run(query)
+                        record = await result.single()
+                        if record:
+                            existing_dims = record["dims"]
+                except Exception as db_err:
+                    logger.debug(f"[DIM-CHECK] DB query failed: {db_err}")
+                    return True, None, None
+
+        if existing_dims is None:
+            return True, None, None  # Empty DB or unsupported DB type — no conflict possible
+
+        # Step 2: Get dims from configured embedder via a test embedding
+        expected_dims = None
+        try:
+            embedder_client = create_embedder_client(config, False)
+            if embedder_client and hasattr(embedder_client, 'create'):
+                test_vector = await embedder_client.create("dimension check")
+                if isinstance(test_vector, list) and len(test_vector) > 0:
+                    expected_dims = len(test_vector)
+        except Exception as embed_err:
+            logger.debug(f"[DIM-CHECK] Embedder test failed: {embed_err}")
+            return True, None, None
+
+        if expected_dims is None:
+            return True, None, None
+
+        # Step 3: Compare
+        if existing_dims != expected_dims:
+            return False, existing_dims, expected_dims
+        return True, existing_dims, expected_dims
+
+    except Exception as e:
+        logger.debug(f"[DIM-CHECK] Dimension check skipped: {e}")
+        return True, None, None
 
     return embedder
 

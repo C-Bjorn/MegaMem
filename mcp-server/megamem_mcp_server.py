@@ -13,6 +13,8 @@ import json
 import asyncio
 import argparse
 import contextlib
+from contextvars import ContextVar
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import socket
@@ -117,8 +119,37 @@ OBSIDIAN_FILE_OPERATIONS = {
     "explore_vault_folders",
     "create_note_with_template",
     "manage_obsidian_folders",
-    "manage_obsidian_notes"
+    "manage_obsidian_notes",
+    "sync_obsidian_note"
 }
+
+# --- Token-Scoped Access Control ---
+
+@dataclass
+class TokenProfile:
+    """Per-token access policy for the Streamable HTTP transport.
+    @purpose: Allowlist-based tool gating per bearer token @depends: httpTokenProfiles in data.json @results: Server-side MCP access control
+    """
+    id: str = ''
+    label: str = ''
+    token: str = ''
+    # Empty lists = no restriction (admin). Non-empty = strict allowlist.
+    allowed_tools: List[str] = dc_field(default_factory=list)
+    allowed_group_ids: List[str] = dc_field(default_factory=list)
+    allowed_databases: List[str] = dc_field(default_factory=list)
+
+# Set by BearerAuthMiddleware on each HTTP request; read by list_tools / call_tool.
+# Default None = stdio mode (no profile → full access).
+current_token_profile: ContextVar[Optional[TokenProfile]] = ContextVar('current_token_profile', default=None)
+
+# Tools that accept group_ids (plural list) — override target for namespace enforcement
+_TOOLS_WITH_GROUP_IDS = frozenset({
+    'search_memory_nodes', 'search_memory_facts', 'get_entity_edge'
+})
+# Tools that accept group_id (singular) — single-value override
+_TOOLS_WITH_GROUP_ID = frozenset({
+    'add_memory', 'add_conversation_memory', 'get_episodes'
+})
 
 # --- Complete MCP Server Implementation ---
 
@@ -152,6 +183,9 @@ class ObsidianMegaMemMCPServer:
         self.episode_queues: Dict[str, asyncio.Queue] = {}
         self.queue_workers: Dict[str, bool] = {}
 
+        # @purpose: Token profiles for HTTP transport gating @depends: httpTokenProfiles in data.json @results: Per-token access control
+        self.http_token_profiles: List[Dict] = []
+
         # Register all tool handlers
         self._register_tool_handlers()
 
@@ -160,17 +194,16 @@ class ObsidianMegaMemMCPServer:
 
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
-            """Return all 18 tools - 9 Graphiti + 9 Obsidian"""
+            """Return tools — filtered by token profile for HTTP clients, full list for stdio."""
             tools = []
-
-            # Add 9 Graphiti tools
             tools.extend(self._get_megamem_tool_definitions())
-
-            # Add 9 Obsidian tools
             tools.extend(self._get_obsidian_tool_definitions())
 
-            logger.info(
-                f"Returning {len(tools)} total tools ({len(self._get_megamem_tool_definitions())} MegaMem + {len(self._get_obsidian_tool_definitions())} Obsidian)")
+            profile = current_token_profile.get()
+            if profile and profile.allowed_tools:
+                tools = [t for t in tools if t.name in profile.allowed_tools]
+
+            logger.info(f"Returning {len(tools)} tools")
             return tools
 
         @self.server.call_tool()
@@ -178,6 +211,35 @@ class ObsidianMegaMemMCPServer:
             """Route tool calls to appropriate handlers"""
             logger.info(f"Calling tool: {name}")
             arguments = arguments or {}
+
+            # --- Token-scoped gating ---
+            profile = current_token_profile.get()
+            if profile and profile.allowed_tools:
+                if name not in profile.allowed_tools:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": f"Tool '{name}' is not permitted for this token",
+                        "code": "TOOL_NOT_PERMITTED"
+                    }))]
+
+            # group_ids override — prevents namespace exfiltration via crafted params
+            if profile and profile.allowed_group_ids:
+                arguments = dict(arguments)
+                if name in _TOOLS_WITH_GROUP_IDS:
+                    arguments['group_ids'] = list(profile.allowed_group_ids)
+                if name in _TOOLS_WITH_GROUP_ID:
+                    arguments['group_id'] = profile.allowed_group_ids[0]
+
+            # database_id validation
+            if profile and profile.allowed_databases:
+                db_id = arguments.get('database_id')
+                if db_id and db_id not in profile.allowed_databases:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": f"Database '{db_id}' is not permitted for this token",
+                        "code": "DATABASE_NOT_PERMITTED"
+                    }))]
+            # --- End gating ---
 
             try:
                 if name in OBSIDIAN_FILE_OPERATIONS:
@@ -595,6 +657,18 @@ WORKFLOW:
                         }
                     },
                     "required": ["operation", "path"]
+                }
+            ),
+            Tool(
+                name="sync_obsidian_note",
+                description="Sync a specific note to MegaMem/Graphiti knowledge graph by path. Opens the note and triggers the registered sync command. Use after updating a note to queue it for sync. Requires Obsidian to be running with MegaMem plugin active. Sync completes asynchronously after this tool returns.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Vault-relative path to the note (e.g. 'My Notes/SomeNote.md'). Do NOT use absolute system paths or prefix with the vault folder name."},
+                        "vault_id": {"type": "string", "description": "Vault ID (optional)"}
+                    },
+                    "required": ["path"]
                 }
             )
         ]
@@ -1240,6 +1314,9 @@ WORKFLOW:
             with open(config_path, 'r') as f:
                 obsidian_config = json.load(f)
 
+            # @purpose: Cache token profiles for HTTP transport gating @depends: httpTokenProfiles in data.json @results: Available to _run_http_server()
+            self.http_token_profiles = obsidian_config.get('httpTokenProfiles', [])
+
             # Initialize WebSocket configuration
             self.ws_port = obsidian_config.get("wsPort", 41484)
             ws_config = {
@@ -1314,7 +1391,7 @@ WORKFLOW:
             logger.info(
                 f"[COMPLETE] MCP Server ready! WebSocket: {websocket_status} | MegaMem: Loading in background")
             logger.info(
-                "[INFO] All 18 tools available: 9 Graphiti + 9 Obsidian")
+                "[INFO] All 19 tools available: 9 Graphiti + 10 Obsidian")
 
         except Exception as e:
             logger.critical(
@@ -2046,13 +2123,40 @@ async def _run_http_server(mcp_server: 'ObsidianMegaMemMCPServer', host: str, po
         stateless=True,
     )
 
+    # @purpose: Build token → profile lookup (admin = full access, scoped = allowlisted)
+    # @depends: auth_token (admin), mcp_server.http_token_profiles (from data.json)
+    # @results: Single dict used by BearerAuthMiddleware for all auth + profile resolution
+    _admin_profile = TokenProfile(id='admin', label='Admin — Full Access', token=auth_token)
+    _token_map: Dict[str, TokenProfile] = {auth_token: _admin_profile}
+    for _p in mcp_server.http_token_profiles:
+        _tp = TokenProfile(
+            id=_p.get('id', ''),
+            label=_p.get('label', ''),
+            token=_p.get('token', ''),
+            allowed_tools=_p.get('allowedTools', []),
+            allowed_group_ids=_p.get('allowedGroupIds', []),
+            allowed_databases=_p.get('allowedDatabases', []),
+        )
+        if _tp.token:
+            _token_map[_tp.token] = _tp
+    logger.info(f"[HTTP] Token profiles: 1 admin + {len(mcp_server.http_token_profiles)} scoped")
+
     class BearerAuthMiddleware(BaseHTTPMiddleware):
-        # @purpose: Reject all requests missing or with wrong Bearer token @depends: auth_token @results: 401 on failure
+        # @purpose: Resolve bearer token → profile; 401 if unknown; set ContextVar for downstream gating
+        # @depends: _token_map, current_token_profile ContextVar @results: Profile available to list_tools/call_tool
         async def dispatch(self, request, call_next):
             auth = request.headers.get('Authorization', '')
-            if not auth.startswith('Bearer ') or auth[7:] != auth_token:
+            if not auth.startswith('Bearer '):
                 return Response('Unauthorized', status_code=401)
-            return await call_next(request)
+            bearer_token = auth[7:]
+            profile = _token_map.get(bearer_token)
+            if profile is None:
+                return Response('Unauthorized', status_code=401)
+            ctx_token = current_token_profile.set(profile)
+            try:
+                return await call_next(request)
+            finally:
+                current_token_profile.reset(ctx_token)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):

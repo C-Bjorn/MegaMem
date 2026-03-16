@@ -385,6 +385,79 @@ async def test_embedding_with_dimensions(config: BridgeConfig) -> Tuple[bool, st
         return False, f"Embedding test failed: {str(e)}", get_latency_ms(start_time)
 
 
+async def check_dimension_compatibility_test(config: BridgeConfig) -> Tuple[bool, str, int]:
+    """
+    Check that configured embedder dimensions match existing DB vector dimensions.
+    Used by the 'Test Connection' button to warn users about embedder mismatches before sync fails.
+    Returns (success, message, latency_ms).
+    """
+    start_time = time.time()
+    try:
+        setup_environment_variables(config)
+
+        # Step 1: Get expected dims from configured embedder
+        embedder_client = sync_create_embedder_client(config, False)
+        if not embedder_client:
+            return False, f"Could not create embedder client for {config.embedder_provider}", get_latency_ms(start_time)
+
+        expected_dims = None
+        if hasattr(embedder_client, 'create'):
+            test_vector = await embedder_client.create("dimension compatibility check")
+            if isinstance(test_vector, list) and len(test_vector) > 0:
+                expected_dims = len(test_vector)
+
+        if expected_dims is None:
+            return False, f"Embedder returned no valid vector ({config.embedder_provider}/{config.embedding_model})", get_latency_ms(start_time)
+
+        # Step 2: Query DB for existing embedding dimensions (Neo4j only)
+        if config.database_type == 'neo4j':
+            try:
+                from neo4j import AsyncGraphDatabase
+                driver = AsyncGraphDatabase.driver(
+                    config.database_url,
+                    auth=(config.database_username, config.database_password)
+                )
+                try:
+                    async with driver.session(database=config.database_name) as session:
+                        result = await session.run(
+                            "MATCH (n:Entity) WHERE n.name_embedding IS NOT NULL "
+                            "RETURN size(n.name_embedding) AS dims LIMIT 1"
+                        )
+                        record = await result.single()
+                        existing_dims = record["dims"] if record else None
+                finally:
+                    await driver.close()
+
+                if existing_dims is None:
+                    return True, (
+                        f"No existing vectors found — embedder ready: "
+                        f"{config.embedder_provider}/{config.embedding_model} ({expected_dims}D)"
+                    ), get_latency_ms(start_time)
+
+                if existing_dims != expected_dims:
+                    return False, (
+                        f'DIMENSION MISMATCH: DB "{config.database_name}" has {existing_dims}D vectors '
+                        f'but {config.embedder_provider}/{config.embedding_model} produces {expected_dims}D. '
+                        f'Fix embedder in MegaMem Settings \u2192 Databases.'
+                    ), get_latency_ms(start_time)
+
+                return True, (
+                    f"Dimensions match \u2713 {existing_dims}D "
+                    f"({config.embedder_provider}/{config.embedding_model})"
+                ), get_latency_ms(start_time)
+
+            except Exception as db_err:
+                return False, f"DB dimension query failed: {str(db_err)}", get_latency_ms(start_time)
+        else:
+            return True, (
+                f"Embedder ready: {config.embedder_provider}/{config.embedding_model} ({expected_dims}D) "
+                f"— dimension check not supported for {config.database_type}"
+            ), get_latency_ms(start_time)
+
+    except Exception as e:
+        return False, f"Dimension check failed: {str(e)}", get_latency_ms(start_time)
+
+
 async def test_provider_combination(config: BridgeConfig) -> Tuple[bool, str, int]:
     """Test both LLM and embedding providers working together"""
     start_time = time.time()
@@ -597,7 +670,7 @@ def main():
     """Main entry point for connection testing"""
     parser = argparse.ArgumentParser(
         description='Test connections for Graphiti Bridge')
-    parser.add_argument('--test-type', choices=['database', 'llm', 'embedding', 'embedding-test', 'combination', 'combination-pipeline', 'episode-test', 'schema-init'], required=True,
+    parser.add_argument('--test-type', choices=['database', 'llm', 'embedding', 'embedding-test', 'combination', 'combination-pipeline', 'episode-test', 'schema-init', 'dimension-check'], required=True,
                         help='Type of connection to test')
     parser.add_argument('--config', type=str, help='JSON configuration string')
     parser.add_argument('--debug', action='store_true',
@@ -753,6 +826,11 @@ def main():
         elif args.test_type == 'schema-init':
             success, message, latency = asyncio.run(
                 test_schema_initialization(config))
+            print_json_response(
+                {'success': success, 'message': message, 'latency': latency})
+        elif args.test_type == 'dimension-check':
+            success, message, latency = asyncio.run(
+                check_dimension_compatibility_test(config))
             print_json_response(
                 {'success': success, 'message': message, 'latency': latency})
 
