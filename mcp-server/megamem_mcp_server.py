@@ -151,6 +151,51 @@ _TOOLS_WITH_GROUP_ID = frozenset({
     'add_memory', 'add_conversation_memory', 'get_episodes'
 })
 
+# --- Template Discovery Helper ---
+
+def _get_available_templates(vault_path: str) -> str:
+    """
+    Scan vault for Templater template files and return a formatted list
+    for injection into the create_note_with_template tool description.
+    Mirrors PluginDetectionHelper.ts readTemplaterConfig pattern:
+      templates_folder = anyRaw.templates_folder || anyRaw.settings?.templates_folder
+    Falls back gracefully if vault path or templates folder is unavailable — never throws.
+    @purpose: Live template discovery at startup @depends: vault_path, Templater data.json @results: Formatted template list string for tool description
+    """
+    try:
+        vault = Path(vault_path)
+        templater_config = vault / ".obsidian" / "plugins" / "templater-obsidian" / "data.json"
+        if not templater_config.exists():
+            raise FileNotFoundError(f"Templater data.json not found: {templater_config}")
+
+        with open(templater_config, 'r', encoding='utf-8') as f:
+            tdata = json.load(f)
+
+        # Mirror PluginDetectionHelper.ts: check top-level first, then settings sub-object
+        templates_folder = (
+            tdata.get("templates_folder") or
+            (tdata.get("settings") or {}).get("templates_folder")
+        )
+        if not templates_folder:
+            raise ValueError("Templater templates_folder not configured in data.json")
+
+        tpl_dir = vault / templates_folder
+        if not tpl_dir.is_dir():
+            raise FileNotFoundError(f"Templates folder not found: {tpl_dir}")
+
+        names = sorted(
+            p.stem for p in tpl_dir.glob("*.md")
+            if p.stem.upper().startswith("TPL ")
+        )
+        if not names:
+            raise ValueError(f"No TPL *.md files found in {templates_folder}")
+
+        template_list = ", ".join(names)
+        return f"Available templates (use exact name or close match):\n  {template_list}"
+    except Exception:
+        return "Available templates: scan unavailable — use TPL + type name (e.g. TPL Person, TPL Note, TPL Meeting)"
+
+
 # --- Complete MCP Server Implementation ---
 
 
@@ -178,6 +223,7 @@ class ObsidianMegaMemMCPServer:
         self.resource_loading_task = None
         self.ready_event = asyncio.Event()
         self.embedder_healthy = True  # Set False if embedder health check fails at startup
+        self._template_list_description = "Available templates: scan unavailable — use TPL + type name (e.g. TPL Person, TPL Note, TPL Meeting)"
 
         # @purpose: Episode queuing to prevent race conditions @depends: asyncio.Queue @results: Sequential episode processing per group_id
         self.episode_queues: Dict[str, asyncio.Queue] = {}
@@ -583,26 +629,18 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="create_note_with_template",
-                description="""Create a new note using a templater template (fuzzy-match) in the vault.
+                description=f"""Create Obsidian note from Templater template. Template list in request_type.
 
-INTELLIGENT ROUTING:
-- TPL Project: Create in given project folder (ie. 03_Projects)/ with BRAND-ProjectName folder structure
-- TPL ProjectDoc: Route to project subfolders (01_Planning/, 02_Development/, etc.) based on context
-- Entity templates: Auto-route to 04_Entities/[type]/ folders
-- Parse natural language: "create project for X called Y" or "create planning doc for Z"
+ROUTING: Templater folder_templates → MegaMem inbox → vault root. TPL Project→03_Projects/{{Name}}/; TPL ProjectDoc→project subfolders; entity templates→04_Entities/.
 
-WORKFLOW:
-1. Read the created note to understand its structure
-2. Extract relevant information from the conversation
-3. Use update_note to fill matching sections and/or move to appropriate folder
-4. Offer to help complete remaining sections""",
+WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_note to fill sections 4) offer remaining""",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "request_type": {"type": "string", "description": "Templater request type (informational)"},
+                        "request_type": {"type": "string", "description": f"Template name to use (fuzzy-matched). {self._template_list_description}"},
                         "file_name": {"type": "string", "description": "Filename to create (required)"},
                         "content": {"type": "string", "description": "Optional content to append after template processing"},
-                        "target_folder": {"type": "string", "description": "Target folder path in the vault (optional)"},
+                        "target_folder": {"type": "string", "description": "Override folder. Most templates self-route via Templater mappings; omit unless forcing a specific location."},
                         "vault_id": {"type": "string", "description": "Vault ID (optional)"}
                     },
                     "required": ["request_type", "file_name"]
@@ -1316,6 +1354,14 @@ WORKFLOW:
 
             # @purpose: Cache token profiles for HTTP transport gating @depends: httpTokenProfiles in data.json @results: Available to _run_http_server()
             self.http_token_profiles = obsidian_config.get('httpTokenProfiles', [])
+
+            # Derive vault path from config_path (e.g. .../vault/.obsidian/plugins/.../data.json → vault root)
+            _config_path_obj = Path(config_path)
+            _obsidian_idx = next((i for i, p in enumerate(_config_path_obj.parts) if p == ".obsidian"), -1)
+            if _obsidian_idx > 0:
+                _vault_path = str(Path(*_config_path_obj.parts[:_obsidian_idx]))
+                self._template_list_description = _get_available_templates(_vault_path)
+                logger.info(f"[TEMPLATES] Discovered templates from: {_vault_path}")
 
             # Initialize WebSocket configuration
             self.ws_port = obsidian_config.get("wsPort", 41484)

@@ -565,45 +565,44 @@ class ObsidianCLI:
         Create a note from a Templater template via eval.
         Uses Templater's create_new_note_from_template() — fully non-interactive.
         Template is matched by basename (fuzzy: request_type contains template name or vice versa).
+
+        Folder resolution (3 tiers, computed in Python before template creation):
+          1. target_folder param (explicit override)
+          2. Templater folder_templates — match by template basename
+          2b. Periodic Notes plugin config — match by template basename, expand date format
+          3. MegaMem inboxFolder setting
+        Folder is pre-created via manage_obsidian_folders (proven CLI pattern) before Templater runs.
         """
-        # Escape for safe single-quote JS string embedding
         safe_request = request_type.replace("'", "\\'")
         safe_filename = file_name.replace("'", "\\'")
-        safe_folder = target_folder.replace("'", "\\'")
 
+        # ── Step 1: Resolve destination folder ───────────────────────────────────
+        if not target_folder:
+            target_folder = self._resolve_template_folder(vault, request_type)
+
+        # ── Step 2: Pre-create the folder segment-by-segment (proven reliable) ──
+        if target_folder:
+            segs = target_folder.split("/")
+            for i in range(1, len(segs) + 1):
+                self.manage_obsidian_folders(vault, "create", "/".join(segs[:i]))
+
+        # ── Step 3: Run Templater with explicit pre-existing folder ───────────────
+        safe_folder = target_folder.replace("'", "\\'")
         js = (
             "(async () => {"
             " const tp = app.plugins.getPlugin('templater-obsidian').templater;"
             " if (!tp) return JSON.stringify({error: 'Templater not available'});"
             f" const rt = '{safe_request}'.toLowerCase();"
-            " const tplFile = app.vault.getFiles().find(f => {"
-            "   const bn = f.basename.toLowerCase();"
-            "   return bn === rt || bn.includes(rt) || rt.includes(bn);"
-            " });"
+            " const _f = app.vault.getFiles();"
+            " const tplFile = _f.find(f => f.basename.toLowerCase() === rt)"
+            "   || _f.find(f => f.basename.toLowerCase().startsWith(rt))"
+            "   || _f.find(f => f.basename.toLowerCase().includes(rt) || rt.includes(f.basename.toLowerCase()));"
             " if (!tplFile) return JSON.stringify({error: 'Template not found: ' + rt});"
-            f" const folderPath = '{safe_folder}';"
-            " let folder;"
-            " if (folderPath) {"
-            "   folder = app.vault.getAbstractFileByPath(folderPath) || app.vault.getRoot();"
-            " } else {"
-            "   const tplSettings = app.plugins.getPlugin('templater-obsidian')?.settings;"
-            "   const mappings = tplSettings?.folder_templates || [];"
-            "   const match = mappings.find(m =>"
-            "     tplFile.basename.toLowerCase().includes(m.template.toLowerCase()) ||"
-            "     m.template.toLowerCase().includes(tplFile.basename.toLowerCase())"
-            "   );"
-            "   if (match?.folder) {"
-            "     folder = app.vault.getAbstractFileByPath(match.folder) || app.vault.getRoot();"
-            "   } else {"
-            "     const mmSettings = app.plugins.getPlugin('megamem-mcp')?.settings;"
-            "     const inboxPath = mmSettings?.mcpTools?.defaults?.inboxFolder || '';"
-            "     folder = inboxPath"
-            "       ? (app.vault.getAbstractFileByPath(inboxPath) || app.vault.getRoot())"
-            "       : app.vault.getRoot();"
-            "   }"
-            " }"
+            f" const folder = app.vault.getAbstractFileByPath('{safe_folder}') || app.vault.getRoot();"
             f" const result = await tp.create_new_note_from_template(tplFile, folder, '{safe_filename}', false);"
-            " return result ? result.path : JSON.stringify({error: 'No file created'});"
+            " return result"
+            "   ? JSON.stringify({path: result.path, templateUsed: tplFile.basename})"
+            "   : JSON.stringify({error: 'No file created'});"
             "})()"
         )
 
@@ -612,24 +611,85 @@ class ObsidianCLI:
             return self._err(out or "Template creation failed via eval")
 
         result_val = out.lstrip("=> ").strip()
-        if result_val.startswith("{"):
-            try:
-                err_obj = json.loads(result_val)
-                return self._err(err_obj.get("error", "Template creation failed"))
-            except json.JSONDecodeError:
-                pass
-
-        created_path = result_val
+        created_path = ""
+        template_used = request_type
+        try:
+            result_obj = json.loads(result_val)
+            if "error" in result_obj:
+                return self._err(result_obj["error"])
+            created_path = result_obj.get("path", "")
+            template_used = result_obj.get("templateUsed", request_type)
+        except (json.JSONDecodeError, TypeError):
+            created_path = result_val  # fallback: raw path string
 
         # Optionally append user-provided content after template
-        if content and created_path and not created_path.startswith("{"):
+        if content and created_path:
             self._run(vault, "append", f"path={created_path}", f"content={_encode_newlines(content)}")
 
         return self._ok({
             "path": created_path,
-            "message": f"Created from template: {request_type}",
-            "templateUsed": request_type,
+            "message": f"Created from template: {template_used}",
+            "templateUsed": template_used,
         })
+
+    def _resolve_template_folder(self, vault: str, request_type: str) -> str:
+        """
+        Resolve destination folder for a template using a synchronous JS eval.
+        No folder creation — just reads plugin settings and returns the path string.
+        Tiers: Templater folder_templates → Periodic Notes config → MegaMem inboxFolder.
+        Returns empty string if none matched (caller falls to vault root).
+        """
+        safe_request = request_type.replace("'", "\\'")
+        js = (
+            f"(()=>{{ const rt = '{safe_request}'.toLowerCase();"
+            " const _af = app.vault.getFiles();"
+            " const tplFile = _af.find(f => f.basename.toLowerCase() === rt)"
+            "   || _af.find(f => f.basename.toLowerCase().startsWith(rt))"
+            "   || _af.find(f => f.basename.toLowerCase().includes(rt) || rt.includes(f.basename.toLowerCase()));"
+            " if (!tplFile) return JSON.stringify({folder:''});"
+            " const tplSettings = app.plugins.getPlugin('templater-obsidian')?.settings;"
+            " const mappings = tplSettings?.folder_templates || [];"
+            " const match = mappings.find(m => {"
+            "   const mBase = m.template.split('/').pop().replace(/\\.md$/i,'').toLowerCase();"
+            "   const tbn = tplFile.basename.toLowerCase();"
+            "   return tbn === mBase || tbn.includes(mBase) || mBase.includes(tbn);"
+            " });"
+            " if (match?.folder) return JSON.stringify({folder: match.folder});"
+            " const pnCfg = app.plugins.getPlugin('periodic-notes')?.settings;"
+            " if (pnCfg) {"
+            "   for (const period of ['daily','weekly','monthly','quarterly','yearly']) {"
+            "     const cfg = pnCfg[period];"
+            "     if (!cfg?.enabled || !cfg.folder || !cfg.template) continue;"
+            "     const pnBase = cfg.template.split('/').pop().replace(/\\.md$/i,'').toLowerCase();"
+            "     const tbn = tplFile.basename.toLowerCase();"
+            "     if (tbn === pnBase || tbn.includes(pnBase) || pnBase.includes(tbn)) {"
+            "       let resolved = cfg.folder.replace(/\\/+$/,'');"
+            "       const fmt = cfg.format || '';"
+            "       if (fmt) {"
+            "         const parts = fmt.split('/');"
+            "         const m = window.moment ? window.moment() : null;"
+            "         if (m && parts.length > 1) {"
+            "           resolved += '/' + parts.slice(0,parts.length-1).map(p=>m.format(p)).join('/');"
+            "         } else if (m && /YYYY/.test(fmt)) {"
+            "           resolved += '/' + m.format('YYYY');"
+            "           if (/MM/.test(fmt)) resolved += '/' + m.format('MM');"
+            "         }"
+            "       }"
+            "       return JSON.stringify({folder: resolved});"
+            "     }"
+            "   }"
+            " }"
+            " const mmSettings = app.plugins.getPlugin('megamem-mcp')?.settings;"
+            " const inboxPath = mmSettings?.mcpTools?.defaults?.inboxFolder || '';"
+            " return JSON.stringify({folder: inboxPath});"
+            "})()"
+        )
+        out, _ = self._run(vault, "eval", f"code={js}")
+        raw = out.lstrip("=> ").strip()
+        try:
+            return json.loads(raw).get("folder", "")
+        except (json.JSONDecodeError, AttributeError):
+            return ""
 
     # ─── Tool 8: manage_obsidian_notes ───────────────────────────────────────
 
