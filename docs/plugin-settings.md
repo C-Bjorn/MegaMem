@@ -396,6 +396,23 @@ MCP server and connection configuration.
 - **Copy MCP Config** <i data-lucide="file-text"></i>: Copy a ready-to-paste `mcpServers` config block (`type: streamable-http`) for Roo Code / Cursor
 - **Start / Stop** <i data-lucide="play"></i>: Manually start or stop the HTTP server process
 
+### Token Profiles (Scoped Access) <i data-lucide="check-circle"></i>
+- Description: Create per-token allowlists for public-facing connections (e.g., chatbots, agents). Each profile restricts which tools, namespaces, databases, and vaults are accessible. The admin token always has full access.
+- Developer Note: Enforcement happens server-side in the MCP server. Restart the HTTP server after making changes.
+
+#### Per-Profile Settings:
+- **Label** — Friendly name for the token profile (e.g., "mm-endo")
+- **Token** — Bearer token to give to the scoped client. Click **Regenerate** to rotate it.
+- **Allowed Tools** — Checkboxes for each MCP tool. Only checked tools are accessible. Uncheck all = no tools accessible.
+- **Allowed Group IDs** — Comma-separated namespace IDs (e.g., `Public, Shared`). Empty = no namespace restriction (not recommended for public tokens).
+- **Allowed Databases** — Checkboxes for each configured database. Only checked databases are accessible via graph tools. Uncheck all = all databases allowed (no restriction). When a scoped token calls a graph tool without specifying `database_id`, the server auto-injects the first allowed database.
+- **Allowed Vaults** — Checkboxes for each registered Obsidian vault. Only checked vaults are accessible via Obsidian file tools. Uncheck all = all vaults allowed (no restriction). When a scoped token calls a file tool without specifying `vault_id`, the server auto-injects the first allowed vault.
+
+#### Actions:
+- **+ Add Profile** — Create a new scoped token profile
+- **Delete** — Remove a token profile (per profile)
+- **Regenerate** — Generate a new token for the profile (invalidates the old one immediately — update the client)
+
 ## Advanced Settings <i data-lucide="settings"></i>
 
 Advanced configuration options for debugging and performance. Many of the settings here are under development, use at your own risk.

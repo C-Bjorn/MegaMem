@@ -137,6 +137,7 @@ class TokenProfile:
     allowed_tools: List[str] = dc_field(default_factory=list)
     allowed_group_ids: List[str] = dc_field(default_factory=list)
     allowed_databases: List[str] = dc_field(default_factory=list)
+    allowed_vaults: List[str] = dc_field(default_factory=list)
 
 # Set by BearerAuthMiddleware on each HTTP request; read by list_tools / call_tool.
 # Default None = stdio mode (no profile → full access).
@@ -276,14 +277,31 @@ class ObsidianMegaMemMCPServer:
                 if name in _TOOLS_WITH_GROUP_ID:
                     arguments['group_id'] = profile.allowed_group_ids[0]
 
-            # database_id validation
-            if profile and profile.allowed_databases:
+            # database_id enforcement (graphiti tools only — obsidian tools don't accept database_id)
+            if profile and profile.allowed_databases and name not in OBSIDIAN_FILE_OPERATIONS:
                 db_id = arguments.get('database_id')
-                if db_id and db_id not in profile.allowed_databases:
+                if not db_id:
+                    # No database_id specified — auto-inject first allowed DB
+                    arguments = dict(arguments)
+                    arguments['database_id'] = profile.allowed_databases[0]
+                elif db_id not in profile.allowed_databases:
                     return [types.TextContent(type="text", text=json.dumps({
                         "success": False,
                         "error": f"Database '{db_id}' is not permitted for this token",
                         "code": "DATABASE_NOT_PERMITTED"
+                    }))]
+
+            # vault_id enforcement for Obsidian tools
+            if profile and profile.allowed_vaults and name in OBSIDIAN_FILE_OPERATIONS:
+                vault_id = arguments.get('vault_id')
+                if not vault_id:
+                    arguments = dict(arguments)
+                    arguments['vault_id'] = profile.allowed_vaults[0]
+                elif vault_id not in profile.allowed_vaults:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": f"Vault '{vault_id}' is not permitted for this token",
+                        "code": "VAULT_NOT_PERMITTED"
                     }))]
             # --- End gating ---
 
@@ -390,7 +408,8 @@ class ObsidianMegaMemMCPServer:
                      "type": "object",
                      "properties": {
                          "group_id": {"type": "string", "description": "Group ID to retrieve episodes from"},
-                         "last_n": {"type": "integer", "description": "Number of most recent episodes to retrieve", "default": 10}
+                         "last_n": {"type": "integer", "description": "Number of most recent episodes to retrieve", "default": 10},
+                         "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                      }
                 }
             ),
@@ -407,7 +426,8 @@ class ObsidianMegaMemMCPServer:
                     "properties": {
                         "entity_name": {"type": "string", "description": "Entity name"},
                         "edge_type": {"type": "string", "description": "Edge type (optional)"},
-                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to scope the search (prevents cross-group data leakage)"}
+                        "group_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional list of group IDs to scope the search (prevents cross-group data leakage)"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                     },
                     "required": ["entity_name"]
                 }
@@ -418,7 +438,8 @@ class ObsidianMegaMemMCPServer:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "uuid": {"type": "string", "description": "UUID of the entity edge to delete"}
+                        "uuid": {"type": "string", "description": "UUID of the entity edge to delete"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                     },
                     "required": ["uuid"]
                 }
@@ -429,7 +450,8 @@ class ObsidianMegaMemMCPServer:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "episode_id": {"type": "string", "description": "Episode ID to delete"}
+                        "episode_id": {"type": "string", "description": "Episode ID to delete"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                     },
                     "required": ["episode_id"]
                 }
@@ -460,7 +482,8 @@ class ObsidianMegaMemMCPServer:
                             }
                         },
                         "group_id": {"type": "string", "description": "Group ID for organizing memories"},
-                        "source_description": {"type": "string", "description": "Source description", "default": "Conversation memory from MCP"}
+                        "source_description": {"type": "string", "description": "Source description", "default": "Conversation memory from MCP"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                     },
                     "required": ["conversation"]
                 }
@@ -835,7 +858,9 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                         'reference_time': datetime.now(timezone.utc),
                         'entity_types': entity_types
                     }
-                    await self.megamem_client.add_episode(**episode_kwargs)
+                    db_id = arguments.get('database_id')
+                    client = await self._get_graphiti_client(db_id)
+                    await client.add_episode(**episode_kwargs)
                 
                 # Queue management
                 if group_id_str not in self.episode_queues:
@@ -968,9 +993,11 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                 # Get group_id and last_n from arguments
 
                 last_n = arguments.get("last_n", 10)
+                database_id = arguments.get('database_id')
+                client = await self._get_graphiti_client(database_id)
 
                 # Call retrieve_episodes
-                episodes = await self.megamem_client.retrieve_episodes(
+                episodes = await client.retrieve_episodes(
                     group_ids=[arguments.get(
                         'group_id') or self.bridge_config.default_namespace],
                     last_n=last_n,
@@ -1005,13 +1032,15 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                         }))]
                     edge_type = arguments.get("edge_type")
                     group_ids = arguments.get("group_ids")
+                    database_id = arguments.get('database_id')
+                    client = await self._get_graphiti_client(database_id)
                     edges = []
 
                     if group_ids:
                         # Scoped search — use _search with group_ids to prevent cross-group leakage
                         search_config = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
                         search_config.limit = 25
-                        results = await self.megamem_client._search(
+                        results = await client._search(
                             query=entity_name,
                             config=search_config,
                             group_ids=group_ids
@@ -1023,7 +1052,7 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                             edges.append(edge_info)
                     else:
                         # Unscoped — backward-compatible, searches all groups
-                        search_results = await self.megamem_client.search(entity_name)
+                        search_results = await client.search(entity_name)
                         for result in (search_results or []):
                             valid_at_val = getattr(result, 'valid_at', '')
                             invalid_at_val = getattr(result, 'invalid_at', '')
@@ -1060,8 +1089,10 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                     if not uuid:
                         return [types.TextContent(type="text", text=json.dumps({"success": False, "error": "uuid is required"}))]
 
-                    entity_edge = await EntityEdge.get_by_uuid(self.megamem_client.driver, uuid)
-                    await entity_edge.delete(self.megamem_client.driver)
+                    database_id = arguments.get('database_id')
+                    client = await self._get_graphiti_client(database_id)
+                    entity_edge = await EntityEdge.get_by_uuid(client.driver, uuid)
+                    await entity_edge.delete(client.driver)
 
                     return [types.TextContent(type="text", text=json.dumps({
                         "success": True,
@@ -1084,7 +1115,9 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                         }))]
 
                     # Call the remove_episode method
-                    await self.megamem_client.remove_episode(episode_id)
+                    database_id = arguments.get('database_id')
+                    client = await self._get_graphiti_client(database_id)
+                    await client.remove_episode(episode_id)
 
                     return [types.TextContent(type="text", text=json.dumps({
                         "success": True,
@@ -1190,7 +1223,9 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                         'reference_time': datetime.now(timezone.utc),
                         'entity_types': entity_types
                     }
-                    await self.megamem_client.add_episode(**episode_kwargs)
+                    db_id = arguments.get('database_id')
+                    client = await self._get_graphiti_client(db_id)
+                    await client.add_episode(**episode_kwargs)
 
                 # Queue management
                 if group_id not in self.episode_queues:
@@ -2182,6 +2217,7 @@ async def _run_http_server(mcp_server: 'ObsidianMegaMemMCPServer', host: str, po
             allowed_tools=_p.get('allowedTools', []),
             allowed_group_ids=_p.get('allowedGroupIds', []),
             allowed_databases=_p.get('allowedDatabases', []),
+            allowed_vaults=_p.get('allowedVaults', []),
         )
         if _tp.token:
             _token_map[_tp.token] = _tp
