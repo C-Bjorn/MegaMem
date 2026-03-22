@@ -159,35 +159,31 @@ def parse_simple_frontmatter(frontmatter_text: str) -> Dict[str, Any]:
 
 def extract_text_content(content: str) -> str:
     """
-    Extract clean text content from markdown, removing frontmatter and cleaning formatting
+    Extract text content from markdown for Graphiti episode body.
+
+    PRESERVES: headers (#), bold/italic (**bold**, *italic*), wikilinks ([[...]]),
+               bullet lists (- item), blockquotes (> text), inline code (`code`).
+    STRIPS: fenced code blocks (```...```), HTML tags, external link URLs.
+
+    Rationale: Graphiti passes episode_body as a raw string directly to the LLM with no
+    internal preprocessing. Modern LLMs handle markdown natively. Structural cues improve
+    entity/relationship extraction quality. Code blocks are stripped to reduce token cost —
+    Graphiti's extraction pipeline ignores them by default (confirmed issue #1299).
     """
     # Remove frontmatter
     _, clean_content = extract_frontmatter(content)
 
-    # Remove wiki-style links [[link]]
-    clean_content = re.sub(r'\[\[([^\]]+)\]\]', r'\1', clean_content)
+    # Strip fenced code blocks — reduces token cost; LLM extraction ignores them anyway
+    clean_content = re.sub(r'```[^\n]*\n.*?```', '', clean_content, flags=re.DOTALL)
 
-    # Remove markdown links [text](url)
-    clean_content = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', clean_content)
-
-    # Remove markdown headers (keep the text)
-    clean_content = re.sub(r'^#+\s+', '', clean_content, flags=re.MULTILINE)
-
-    # Remove markdown emphasis (keep the text)
-    clean_content = re.sub(r'\*\*([^\*]+)\*\*', r'\1', clean_content)  # Bold
-    clean_content = re.sub(r'\*([^\*]+)\*', r'\1', clean_content)      # Italic
-    clean_content = re.sub(r'_([^_]+)_', r'\1', clean_content)         # Italic
-
-    # Remove code blocks and inline code
-    clean_content = re.sub(r'```[^`]*```', '', clean_content, flags=re.DOTALL)
-    clean_content = re.sub(r'`([^`]+)`', r'\1', clean_content)
-
-    # Remove HTML tags
+    # Strip HTML tags — noise with no semantic value for extraction
     clean_content = re.sub(r'<[^>]+>', '', clean_content)
 
-    # Clean up whitespace
-    clean_content = re.sub(
-        r'\n\s*\n', '\n\n', clean_content)  # Multiple newlines
+    # Simplify external markdown links [text](url) -> text (keep label, drop URL noise)
+    clean_content = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', clean_content)
+
+    # Clean up whitespace artifacts from stripped blocks
+    clean_content = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_content)  # 3+ newlines -> double
     clean_content = clean_content.strip()
 
     return clean_content

@@ -23,6 +23,7 @@ from graphiti_core import Graphiti
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
+import re
 import argparse
 import traceback
 import sys
@@ -1131,6 +1132,19 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         if custom_extraction_instructions is None:
             custom_extraction_instructions = global_instructions
 
+        # Phase 5: Wikilink extraction hints — inject [[wikilinks]] found in note as entity hints
+        if getattr(config, 'wikilink_extraction_hints', True) and text_content:
+            wikilinks = re.findall(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]', text_content)
+            unique_links = list(dict.fromkeys(wikilinks))  # deduplicate, preserve order
+            if unique_links:
+                link_display = ', '.join(f'[[{lnk}]]' for lnk in unique_links[:30])  # cap at 30
+                hint_block = (
+                    f"\n\nThe following wiki-style links in the text represent known entity references "
+                    f"in the user's knowledge base. Treat each as a likely entity: {link_display}. "
+                    f"When a link uses alias format like [[target|display]], the target is the canonical entity name."
+                )
+                custom_extraction_instructions = (custom_extraction_instructions or '') + hint_block
+
         # Resolve saga name and previous episode UUID for timeline chaining
         saga_name = None
         saga_previous_uuid = None
@@ -1159,18 +1173,42 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
             if debug_mode:
                 logger.debug(f"Saga: name='{saga_name}', previous_uuid='{saga_previous_uuid}'")
 
+        # Build episode_meta — injected into frontmatter after all field filtering, immune to Phase 2/3
+        # Allows MCP search results to return vault path, vault_id, obsidian URL, and contributor
+        episode_meta: Dict[str, str] = {}
+        try:
+            from urllib.parse import quote as _url_quote
+            vault_path_str = (getattr(config, 'vault_path', '') or '').replace('\\', '/').rstrip('/')
+            vault_name = Path(vault_path_str).name if vault_path_str else getattr(config, 'default_namespace', 'vault')
+            note_posix = note_path.replace('\\', '/')
+            # Use vault-relative path — what Obsidian MCP tools expect; vault_id disambiguates which vault
+            if vault_path_str and note_posix.lower().startswith(vault_path_str.lower() + '/'):
+                vault_rel = note_posix[len(vault_path_str) + 1:]
+            else:
+                vault_rel = note_posix
+            episode_meta['mm_note_path'] = vault_rel
+            episode_meta['mm_vault_id'] = vault_name
+            episode_meta['mm_obsidian_url'] = f"obsidian://open?vault={_url_quote(vault_name)}&file={_url_quote(vault_rel, safe='/')}"
+            contributor = getattr(config, 'episode_contributor', None) or ''
+            if contributor:
+                episode_meta['mm_contributor'] = contributor
+        except Exception:
+            pass
+
         # Choose episode creation strategy based on ontology setting
         if config.use_custom_ontology:
             # Use custom entity episodes with Pydantic models
             graphiti_result = await create_custom_entity_episode(
                 graphiti, note_name, clean_text, reference_time, group_id, metadata, logger, database_type, config, debug_mode, custom_extraction_instructions,
-                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid
+                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid,
+                episode_meta=episode_meta
             )
         else:
             # Use generic text episodes
             graphiti_result = await create_generic_text_episode(
                 graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, debug_mode, metadata, custom_extraction_instructions,
-                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid
+                saga_name=saga_name, saga_previous_uuid=saga_previous_uuid,
+                episode_meta=episode_meta
             )
 
         note_end_time = datetime.now()
@@ -1276,8 +1314,6 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
                     f"API rate limit detected for note {note_path}: {e}")
 
             # Parse Anthropic-specific reset time: "You will regain access on 2025-10-01 at 00:00 UTC"
-            import re
-
             retry_after = 60  # Default fallback
             reset_time = None
 
@@ -1401,7 +1437,8 @@ def serialize_value(value, seen=None, depth=0, max_depth=3):
 
 async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
                                       reference_time: datetime, group_id: str, logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, metadata: Optional[Dict[str, Any]] = None, custom_extraction_instructions: Optional[str] = None,
-                                      saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None):
+                                      saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None,
+                                      episode_meta: Optional[Dict[str, str]] = None):
     """Create a generic text episode using EpisodeType.text"""
 
     try:
@@ -1416,32 +1453,47 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         else:
             formatted_reference_time = reference_time
 
-        # Use source description from frontmatter.type if present, else fallback to config/default
+        # Use source description from frontmatter.type if present; fall back to note_name for untyped notes
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
         if frontmatter_type:
             source_description = str(frontmatter_type)
         else:
-            source_description = getattr(
-                config, 'source_description', 'obsidian_mm_default') if config else 'obsidian_mm_fallback'
+            # Phase 1: use note filename as source_description when no type (custom ontology disabled)
+            source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
 
         # Merge frontmatter into the body if metadata is provided; otherwise use body as-is
         merged_body = clean_text
         if isinstance(metadata, dict) and metadata:
+            # Phase 2: strip globally ignored fields from episode body
+            ignored = set(getattr(config, 'globally_ignored_fields', []) or [])
+            filtered_metadata = {k: v for k, v in metadata.items() if k not in ignored}
+
+            # Phase 3: strict property inclusion — only include properties enabled in ontology.json
+            if getattr(config, 'property_inclusion_mode', 'permissive') == 'strict':
+                note_type = filtered_metadata.get('type')
+                enabled_props = getattr(config, 'enabled_properties', None) or {}
+                if note_type and note_type in enabled_props:
+                    allowed = set(enabled_props[note_type]) | {'type'}  # always keep type field
+                    filtered_metadata = {k: v for k, v in filtered_metadata.items() if k in allowed}
+
             frontmatter_lines = ["---"]
-            for k, v in metadata.items():
+            for k, v in filtered_metadata.items():
                 if isinstance(v, (dict, list)):
                     val = json.dumps(v)
                 else:
                     val = str(v)
                 frontmatter_lines.append(f"{k}: {val}")
+            # Always inject episode_meta (back-references) — immune to Phase 2/3 filtering
+            for meta_key, meta_val in (episode_meta or {}).items():
+                frontmatter_lines.append(f"{meta_key}: {meta_val}")
             frontmatter_lines.append("---")
             frontmatter_block = "\n".join(frontmatter_lines)
             merged_body = f"{frontmatter_block}\n{clean_text}"
             if debug_mode:
                 logger.debug(
-                    f"Frontmatter: {len(metadata)} fields attached to body")
+                    f"Frontmatter: {len(filtered_metadata)} fields attached to body (filtered from {len(metadata)})")
         episode_kwargs = {
             'name': note_name,
             'episode_body': merged_body,
@@ -1494,7 +1546,8 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
 async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str,
                                        reference_time: datetime, group_id: str,
                                        metadata: Dict[str, Any], logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, custom_extraction_instructions: Optional[str] = None,
-                                       saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None):
+                                       saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None,
+                                       episode_meta: Optional[Dict[str, str]] = None):
     """Create a custom entity episode using Graphiti Custom Entities API"""
 
     try:
@@ -1516,34 +1569,48 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
 
         # No custom entity types available, fall back to generic episode
         if not entity_types:
-            return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid)
+            return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid, episode_meta=episode_meta)
 
-        # Use source description from frontmatter type if available, else fallback to config/default
+        # Use source description from frontmatter type if available; fall back to note_name for untyped notes
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
         if frontmatter_type:
             source_description = str(frontmatter_type)
         else:
-            source_description = getattr(
-                config, 'source_description', 'obsidian_mm_default') if config else 'obsidian_mm_fallback'
+            source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
 
         # Merge frontmatter into the body
         merged_body = clean_text
         if isinstance(metadata, dict) and metadata:
+            # Phase 2: strip globally ignored fields from episode body
+            ignored = set(getattr(config, 'globally_ignored_fields', []) or [])
+            filtered_metadata = {k: v for k, v in metadata.items() if k not in ignored}
+
+            # Phase 3: strict property inclusion — only include properties enabled in ontology.json
+            if getattr(config, 'property_inclusion_mode', 'permissive') == 'strict':
+                note_type = filtered_metadata.get('type')
+                enabled_props = getattr(config, 'enabled_properties', None) or {}
+                if note_type and note_type in enabled_props:
+                    allowed = set(enabled_props[note_type]) | {'type'}
+                    filtered_metadata = {k: v for k, v in filtered_metadata.items() if k in allowed}
+
             frontmatter_lines = ["---"]
-            for k, v in metadata.items():
+            for k, v in filtered_metadata.items():
                 if isinstance(v, (dict, list)):
                     val = json.dumps(v)
                 else:
                     val = str(v)
                 frontmatter_lines.append(f"{k}: {val}")
+            # Always inject episode_meta (back-references) — immune to Phase 2/3 filtering
+            for meta_key, meta_val in (episode_meta or {}).items():
+                frontmatter_lines.append(f"{meta_key}: {meta_val}")
             frontmatter_lines.append("---")
             frontmatter_block = "\n".join(frontmatter_lines)
             merged_body = f"{frontmatter_block}\n{clean_text}"
             if debug_mode:
                 logger.debug(
-                    f"Frontmatter: {len(metadata)} fields attached to body")
+                    f"Frontmatter: {len(filtered_metadata)} fields attached to body (filtered from {len(metadata)})")
         episode_kwargs = {
             'name': note_name,
             'episode_body': merged_body,
@@ -1602,9 +1669,16 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
     debug_mode = getattr(config, 'debug', False)
 
     try:
-        # 1. Property namespacing (highest priority)
-        if config.enable_property_namespacing and metadata and 'g_group_id' in metadata:
-            namespace = str(metadata['g_group_id']).strip()
+        # 1. Property namespacing (highest priority) — mm_group_id preferred, g_group_id deprecated
+        if config.enable_property_namespacing and metadata:
+            namespace = None
+            if 'mm_group_id' in metadata:
+                namespace = str(metadata['mm_group_id']).strip() or None
+            elif 'g_group_id' in metadata:
+                namespace = str(metadata['g_group_id']).strip() or None
+                if namespace:
+                    # Phase 6: deprecation warning for old field name
+                    logger.warning("Frontmatter field 'g_group_id' is deprecated; rename to 'mm_group_id'")
             if namespace:
                 if debug_mode:
                     logger.debug(f"Using property namespace: {namespace}")

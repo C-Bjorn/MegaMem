@@ -837,6 +837,11 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                     with open(config_path, 'r') as f:
                         obsidian_config = json.load(f)
 
+                    # Prepend mm_contributor if episodeContributor is configured
+                    contributor = obsidian_config.get('episodeContributor', '') or ''
+                    if contributor:
+                        episode_body = f"mm_contributor: {contributor}\n\n{episode_body}"
+
                     entity_types = {}
                     use_custom = obsidian_config.get('useCustomOntology')
                     if use_custom:
@@ -1210,13 +1215,17 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                     with open(config_path, 'r') as f:
                         obsidian_config = json.load(f)
 
+                    # Prepend mm_contributor if episodeContributor is configured
+                    contributor = obsidian_config.get('episodeContributor', '') or ''
+                    body = f"mm_contributor: {contributor}\n\n{episode_body}" if contributor else episode_body
+
                     entity_types = {}
                     if obsidian_config.get('useCustomOntology'):
                         entity_types = get_entity_types_with_config(obsidian_config)
 
                     episode_kwargs = {
                         'name': name_param,
-                        'episode_body': episode_body,
+                        'episode_body': body,
                         'source': EpisodeType.text,
                         'source_description': source_description,
                         'group_id': group_id,

@@ -7,7 +7,7 @@ Handles configuration validation, environment variables, and provider-specific s
 import os
 import json
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 
@@ -78,6 +78,18 @@ class BridgeConfig:
 
     # Optional override of namespace group_id provided by TS side (pass-through like source_description)
     group_id: Optional[str] = None
+
+    # Episode body field filtering (Phases 2 + 3)
+    globally_ignored_fields: List[str] = field(default_factory=lambda: ['cssclass', 'mm_uid', 'mm_sync'])
+    property_inclusion_mode: str = 'permissive'  # 'permissive' | 'strict'
+    enabled_properties: Optional[Dict[str, List[str]]] = None  # { EntityType: [prop1, prop2] } for strict mode
+
+    # Wikilink extraction hints (Phase 5)
+    wikilink_extraction_hints: bool = True
+
+    # Episode contributor — injected as mm_contributor for shared-DB attribution
+    episode_contributor: Optional[str] = None
+
     # WebSocket Configuration for Extended MCP
     ws_port: int = 8765
     ws_auth_token: str = ""
@@ -176,6 +188,17 @@ class BridgeConfig:
 
             # Optional namespace override (mirrors source_description pass-through)
             group_id=config_dict.get('group_id') or config_dict.get('groupId'),
+
+            # Episode body field filtering (Phases 2 + 3)
+            globally_ignored_fields=config_dict.get('globally_ignored_fields', config_dict.get('globallyIgnoredFields', ['cssclass', 'mm_uid', 'mm_sync'])),
+            property_inclusion_mode=config_dict.get('property_inclusion_mode', config_dict.get('propertyInclusionMode', 'permissive')),
+            enabled_properties=config_dict.get('enabled_properties', config_dict.get('enabledProperties')),
+
+            # Wikilink extraction hints (Phase 5)
+            wikilink_extraction_hints=config_dict.get('wikilink_extraction_hints', config_dict.get('wikilinkExtractionHints', True)),
+
+            # Episode contributor
+            episode_contributor=config_dict.get('episode_contributor', config_dict.get('episodeContributor')) or None,
 
             # WebSocket Configuration for Extended MCP
             ws_port=config_dict.get(
