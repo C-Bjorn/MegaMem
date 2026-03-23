@@ -4,7 +4,7 @@
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
@@ -38,11 +38,15 @@ All 9 file operation tools run through the native **Obsidian CLI** (v1.12+) — 
 
 ### 🌐 Streamable HTTP MCP Transport _(new in v1.4.0)_
 
-Connect **Roo Code, Cursor, and any HTTP-capable MCP client** directly to MegaMem — no Claude Desktop required. Enable the opt-in Streamable HTTP server (MCP spec 2025-03-26) in Plugin Settings → Servers. The plugin auto-starts a dedicated HTTP process on port `3838` with Bearer token auth. All 19 tools are available over HTTP. Claude Desktop stdio is completely unchanged.
+Connect **Roo Code, Cursor, Claude Code, VS Code, NemoClaw, and any HTTP-capable MCP client** directly to MegaMem — no Claude Desktop required. Enable the opt-in Streamable HTTP server (MCP spec 2025-03-26) in Plugin Settings → Servers. Token Profiles let you create scoped bearer tokens per client, each with a one-click Copy Config for all 6 supported clients. Remote access via Tailscale is supported via a per-profile Endpoint URL field.
 
 ### 🔄 Intelligent Sync
 
-Auto-sync on interval, sync on demand, or trigger from MCP. Filter by folder inclusion/exclusion. Choose "new only" or "new + updated". Frontmatter-tracked `mm_uid` ensures path-independent note identity.
+Auto-sync on interval, sync on demand, or trigger from MCP. Filter by folder inclusion/exclusion. Choose "new only" or "new + updated". Sync state is tracked in a local **SQLite database** (`sync.db`) — per-note, per-database, with content hashing to skip unchanged notes and full analytics logging (token counts, entity counts, sync duration).
+
+### 📊 Sync Analytics Dashboard _(new in v1.5.5)_
+
+The unified **MegaMem panel** (brain icon, copper accent) combines Ontology, Sync, and Analytics in a single tabbed sidebar. The **Analytics tab** provides a comprehensive dashboard: animated summary cards (Synced Notes, Entities Extracted, Edges Created, Estimated Cost), a **Sync Timeline chart**, **Token Usage by Model** (Big / Small / Both Model views), a sortable **Model Performance table** with Provider column, a **Synced Notes accordion** with per-session detail (In/Out/Total tokens, duration, small model, error message), and sync health indicators. Pricing data is seeded from your Model Library and updated after every provider fetch.
 
 ### ✦ MegaMem Pro _(new)_
 
@@ -131,7 +135,7 @@ Notes are processed through Graphiti's extraction pipeline:
 
 - Entities become graph nodes with versioned properties
 - Relationships are extracted from note content via LLM
-- `mm_uid` frontmatter tracks each note across renames and moves
+- Sync state tracked in SQLite (`sync.db`) per-note/per-DB with content hashing — unchanged notes are skipped automatically
 - AI assistants query this structured graph via MCP
 
 ---
@@ -174,19 +178,20 @@ Plugin Settings → API Keys → enter your key. Click **"Load Defaults"** to po
 Plugin Settings → Database Configuration → enter your connection details → **"Test Connection"** → **"Initialize Schema"**.
 
 **Step 5 — Connect your MCP client**
-- **Claude Desktop (stdio):** Plugin Settings → Servers → **"Generate Config"** → paste into `claude_desktop_config.json` → restart Claude Desktop.
-- **Roo Code / Cursor (HTTP):** Plugin Settings → Servers → Streamable HTTP → enable toggle → **"Copy MCP Config"** → paste into your client's MCP config. No Claude Desktop needed.
+- **Claude Desktop (stdio):** Plugin Settings → Servers → **STDIO MCP Server** → **"Generate Config"** → paste into `claude_desktop_config.json` → restart Claude Desktop.
+- **HTTP clients (Roo Code, Cursor, Claude Code, VS Code, NemoClaw):** Plugin Settings → Servers → **Streamable HTTP Access** → enable toggle → expand the **Admin token profile** → click the **Copy Config** button for your client. No Claude Desktop needed.
 
 **Step 6 — (Optional) Configure sync**
-Set included/excluded folders, choose sync mode (new only vs. new + updated), set auto-sync interval.
+Advanced sync settings (auto-sync toggle, sync interval, included folders) are in Plugin Settings → **Advanced Settings** tab → **Auto-Sync**. Excluded folders and per-note extraction settings are in General → Sync Configuration.
 
 **Step 7 — Start syncing**
-Two ways to sync:
+Three ways to sync:
 
 - **Single note:** click the **sync icon** (top-right of any note window) to sync the current note
-- **Bulk sync:** click the **MegaMem icon** in the left sidebar to open the **Sync Manager**
+- **Bulk sync / Analytics:** click the **🧠 brain icon** in the ribbon to open the unified **MegaMem panel** → switch to the **Sync** tab for bulk operations
+- **Command palette:** `MegaMem: Open Sync` / `MegaMem: Open Analytics` / `MegaMem: Open Ontology`
 
-> ⚠️ **Notes must have a `type` property in their frontmatter to use bulk Sync Manager.**
+> ⚠️ **Notes must have a `type` property in their frontmatter to use bulk Sync (when Custom Ontology is enabled).**
 
 ---
 
@@ -239,6 +244,8 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 ### Shipped ✅
 
+- **Unified MegaMem Panel & Sync Analytics Dashboard** — brain icon ribbon, tabbed panel (Ontology | Sync | Analytics), animated summary cards, Timeline chart, Token Usage by Model (Big/Small/Both), sortable Model Performance table with Provider column, Synced Notes accordion, Sync Health indicators, bundled model pricing _(v1.5.5)_
+- **SQLite Sync Registry** — `sync.db` replaces `sync.json`; per-note/per-DB content hashing (skip unchanged), full analytics logging (token counts, entity/edge counts, duration, model used), episode UUID chain via SQLite (no more `mm_uid` frontmatter writes) _(v1.5.5)_
 - **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
 - **Multi-vault architecture** — masterVault control panel, childVault registration, MCP `database_id` routing, `list_databases` tool _(v1.5)_
 - Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
@@ -246,7 +253,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation
-- Model Library — live model fetching from 8 LLM providers
+- Model Library — live model fetching from 8 LLM providers; pricing synced to analytics DB for cost tracking
 - Constrained ontology generation (edge type cap + deduplication)
 - Ontology file separation (`ontology.json` split from `data.json`)
 - Auto-update system — Python components auto-install and self-update

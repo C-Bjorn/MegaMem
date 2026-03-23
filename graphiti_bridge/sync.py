@@ -1168,10 +1168,14 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
             except Exception:
                 pass
         if saga_name:
-            sync_records = _load_sync_records(getattr(config, 'vault_path', None), debug_mode, logger)
-            saga_previous_uuid = lookup_saga_previous_uuid(saga_name, sync_records)
+            # Use DbConfig.id if passed from TypeScript (Day58); fall back to database_type
+            db_id_for_saga = getattr(config, 'database_id', None) or getattr(config, 'database_type', 'neo4j')
+            saga_previous_uuid = lookup_saga_previous_uuid_sqlite(
+                saga_name, db_id_for_saga,
+                getattr(config, 'vault_path', None), debug_mode, logger
+            )
             if debug_mode:
-                logger.debug(f"Saga: name='{saga_name}', previous_uuid='{saga_previous_uuid}'")
+                logger.debug(f"Saga: name='{saga_name}', db_id='{db_id_for_saga}', previous_uuid='{saga_previous_uuid}'")
 
         # Build episode_meta — injected into frontmatter after all field filtering, immune to Phase 2/3
         # Allows MCP search results to return vault path, vault_id, obsidian URL, and contributor
@@ -1195,6 +1199,13 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         except Exception:
             pass
 
+        # Reset token tracker before episode creation (Phase 4b)
+        if hasattr(graphiti, 'token_tracker') and graphiti.token_tracker:
+            try:
+                graphiti.token_tracker.reset()
+            except Exception:
+                pass
+
         # Choose episode creation strategy based on ontology setting
         if config.use_custom_ontology:
             # Use custom entity episodes with Pydantic models
@@ -1210,6 +1221,22 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
                 saga_name=saga_name, saga_previous_uuid=saga_previous_uuid,
                 episode_meta=episode_meta
             )
+
+        # Read token usage after episode creation (Phase 4b)
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        if hasattr(graphiti, 'token_tracker') and graphiti.token_tracker:
+            try:
+                usage = graphiti.token_tracker.get_total_usage()
+                if usage:
+                    input_tokens = getattr(usage, 'input_tokens', 0) or 0
+                    output_tokens = getattr(usage, 'output_tokens', 0) or 0
+                    total_tokens = getattr(usage, 'total_tokens', None)
+                    if total_tokens is None:
+                        total_tokens = input_tokens + output_tokens
+            except Exception:
+                pass
 
         note_end_time = datetime.now()
         processing_duration = (note_end_time - note_start_time).total_seconds()
@@ -1227,6 +1254,7 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
                 relationships_count = len(graphiti_result.edges)
             elif hasattr(graphiti_result, 'relationships'):
                 relationships_count = len(graphiti_result.relationships)
+            community_count = len(graphiti_result.communities) if hasattr(graphiti_result, 'communities') and graphiti_result.communities else 0
 
             # Use the dedicated helper to extract the episode UUID
             episode_uuid = extract_episode_uuid_from_result(
@@ -1257,6 +1285,14 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
                 'processing_duration_seconds': processing_duration,
                 'start_time': note_start_time.isoformat(),
                 'end_time': note_end_time.isoformat(),
+                # Analytics fields (Phase 5a) — consumed by SyncStorageService.recordSync()
+                'entity_count': entities_count,
+                'edge_count': relationships_count,
+                'community_count': community_count,
+                'sync_duration_ms': int(processing_duration * 1000),
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'total_tokens': total_tokens,
                 'metrics': {
                     'entities_count': entities_count,
                     'relationships_count': relationships_count,
@@ -1851,7 +1887,7 @@ def resolve_saga_name(
 
 
 def lookup_saga_previous_uuid(saga_name: str, sync_records: list) -> Optional[str]:
-    """Find the most recent episode UUID in a saga from existing sync records."""
+    """Find the most recent episode UUID in a saga from existing sync records (legacy JSON fallback)."""
     matching = [
         entry
         for record in sync_records
@@ -1864,8 +1900,47 @@ def lookup_saga_previous_uuid(saga_name: str, sync_records: list) -> Optional[st
     return matching[0].get('episode_uuid')
 
 
+def lookup_saga_previous_uuid_sqlite(
+    saga_name: str,
+    db_id: str,
+    vault_path: Optional[str],
+    debug_mode: bool,
+    logger,
+) -> Optional[str]:
+    """
+    Find the most recent episode UUID for a saga via SQLite O(log n) indexed query.
+    Falls back to the JSON scan if sync.db doesn't exist yet (pre-migration).
+    """
+    if not saga_name or not vault_path:
+        return None
+
+    db_path = Path(vault_path) / '.obsidian' / 'plugins' / 'megamem-mcp' / 'sync.db'
+    if db_path.exists():
+        try:
+            import sqlite3 as _sqlite3
+            with _sqlite3.connect(str(db_path), timeout=5.0) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                row = conn.execute(
+                    "SELECT episode_uuid FROM sync_records "
+                    "WHERE saga_name=? AND db_id=? AND status='synced' "
+                    "ORDER BY synced_at DESC LIMIT 1",
+                    (saga_name, db_id),
+                ).fetchone()
+            if row and row[0]:
+                if debug_mode and logger:
+                    logger.debug(f"SQLite saga lookup: saga='{saga_name}' db='{db_id}' → {row[0]}")
+                return row[0]
+        except Exception as exc:
+            if debug_mode and logger:
+                logger.debug(f"SQLite saga lookup failed, falling back to JSON: {exc}")
+
+    # Fallback: JSON scan (pre-migration or if SQLite unavailable)
+    sync_records = _load_sync_records(vault_path, debug_mode, logger)
+    return lookup_saga_previous_uuid(saga_name, sync_records)
+
+
 def _load_sync_records(vault_path: Optional[str], debug_mode: bool, logger) -> list:
-    """Load sync records from sync.json for saga chain lookups."""
+    """Load sync records from sync.json for legacy saga chain lookups (pre-SQLite-migration)."""
     if not vault_path:
         return []
     sync_json_path = Path(vault_path) / '.obsidian' / 'plugins' / 'megamem-mcp' / 'sync.json'

@@ -1,10 +1,14 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2026-03-13
+date_updated: 2026-03-23
 ---
 # MegaMem Plugin Settings
 
-The settings panel has two tabs at the top: **General Settings** (all configuration — database, LLM, sync, etc.) and **✦ MegaMem Pro** (license key and content packages).
+The settings panel has **three tabs**: **General Settings** (core config — database, LLM, sync, servers, MCP tools), **Advanced Settings** (multi-vault, auto-sync, CLI/WebSocket, schema discovery, developer options, updates), and **✦ MegaMem Pro** (license key and content packages).
+
+**General Settings** contains: Python Environment, API Keys, Model Library, LLM Configuration, Database Configuration, Sync Configuration, Knowledge Namespacing, Servers, MCP Tools.
+
+**Advanced Settings** contains: Multi-Vault Mode, Obsidian CLI and WebSocket, Schema Discovery and UI, Auto-Sync, Development Options, Updates.
 
 ## ✦ MegaMem Pro Tab
 
@@ -212,9 +216,24 @@ The "Databases" accordion shows all configured database targets. Each entry coll
 
 > **Note:** Existing single-database configs are auto-migrated to `databases[0]` on first load after upgrading to v1.5. No manual action required.
 
+> **Note:** The Multi-Vault Mode accordion has moved to the **Advanced Settings** tab.
+
+### Sync Identity (Per-Database Icons)
+
+Each named database can have a configurable **Lucide icon** and **icon color** shown in the note ribbon and file explorer:
+- **Icon**: Lucide icon name (quick-pick buttons for common choices: brain, database, cloud, server, archive, etc.). Default: `brain`.
+- **Icon Color**: Hex color for the icon. Default: `#fea120`.
+- **Write Sync Breadcrumb**: When enabled, writes an `mm_sync: {db_label: ISO-timestamp}` entry to note frontmatter after sync — useful for shared Relay folders so partners can see what's been synced.
+
+These settings are available both when **editing an existing database** and when **adding a new database**.
+
+> **Sync State**: As of v1.6, sync state is stored in `sync.db` (SQLite) — a local database inside the plugin directory. This replaces the old `sync.json` file. Migration from sync.json happens automatically on first load.
+
 ### Multi-Vault Mode <i data-lucide="check-circle"></i>
 
-A dedicated **"Multi-Vault Mode"** accordion (separate from the Database list) controls master/child vault relationships.
+> **Located in:** Advanced Settings tab → Multi-Vault Mode accordion.
+
+A dedicated **"Multi-Vault Mode"** accordion controls master/child vault relationships.
 
 **Master Vault toggle:** When enabled, this vault runs the MCP server and shows a "Registered Child Vaults" panel.
 
@@ -253,30 +272,27 @@ A dedicated **"Multi-Vault Mode"** accordion (separate from the Database list) c
 - **Linux**: `~/.local/share/MegaMem/python/{vault-name}/venv`
 - Developer Note: On first upgrade from an older version, the shared venv is automatically copied to the vault-specific location. No manual action required.
 
-## Sync Configuration <i data-lucide="alert-triangle"></i>
+## Sync Configuration
 
-Configure automatic synchronization behavior. **WARNING**: This works, but we HIGHLY RECOMMEND NOT USING IT. It is not thoroughly tested, conflicts may arise between Included & Excluded folders and time intervals. Much work remains to be done.
+Configure per-note sync behavior, extraction settings, and folder exclusions.
 
-### Automatically sync notes at scheduled intervals <i data-lucide="clock"></i>
-- Description: Automatically sync notes when they are saved or at regular intervals
-- Developer Note: Enhanced UI complete, sync engine needs update.
+> **Auto-sync settings** (schedule, interval, included folders) have moved to **Advanced Settings → Auto-Sync**.
 
-### Sync Options <i data-lucide="clock"></i>
-- Description: Choose which notes to include in automatic sync operations
-- Options: New notes only, New and updated notes
-- Developer Note: UI implementation complete.
+Settings in this accordion (in order):
 
-### Sync Interval <i data-lucide="clock"></i>
-- Description: Automatic sync interval in minutes (0 to disable)
-- Developer Note: UI complete, sync engine not implemented.
+### Episode Contributor <i data-lucide="check-circle"></i>
+- Description: Your name or ID — injected as `mm_contributor` on every synced episode. Useful in shared team databases. Leave blank to omit.
 
-### Included Folders <i data-lucide="check-circle"></i>
-- Description: Folders to include in sync. Leave empty to include all folders.
-- Developer Note: Dynamic folder management with FolderSuggest integration.
+### Global Extraction Instructions <i data-lucide="check-circle"></i>
+- Description: Free-text instructions injected into Graphiti's extraction prompts for all notes. Guides the LLM on what to extract, what to ignore, or how to interpret your vault's content. Can be overridden per namespace in Custom Folder Mappings.
 
-#### Actions:
-- **Add Folder** <i data-lucide="folder-plus"></i>: Add a new folder to include in sync
-- **Delete** <i data-lucide="x"></i>: Remove folder from inclusion list (per folder)
+### Wikilink Extraction Hints <i data-lucide="check-circle"></i>
+- Description: When enabled, `[[wikilinks]]` found in the note body are injected as entity hints in the LLM extraction instructions. Default: on.
+
+### Property Inclusion Mode <i data-lucide="check-circle"></i>
+- Description: Controls which frontmatter properties are included in the episode body.
+  - **Permissive (default)**: All frontmatter fields except Globally Ignored Fields
+  - **Strict**: Only properties enabled in ontology.json for the note's entity type (requires Custom Ontologies)
 
 ### Excluded Folders <i data-lucide="check-circle"></i>
 - Description: Folders to exclude from sync (e.g., .obsidian, .trash).
@@ -287,12 +303,23 @@ Configure automatic synchronization behavior. **WARNING**: This works, but we HI
 - **Delete** <i data-lucide="x"></i>: Remove folder from exclusion list (per folder)
 
 ### Globally Ignored Fields <i data-lucide="check-circle"></i>
-- Description: YAML frontmatter fields to ignore globally across all notes.
-- Developer Note: Prevents specific frontmatter fields from being synced.
+- Description: YAML frontmatter fields to exclude from the episode body sent to Graphiti. Default: `cssclass`, `mm_uid`, `mm_sync`. These fields are now actually stripped from the episode body (was silently broken in earlier versions).
+- Developer Note: Filters happen in `sync.py` Stage 3 before YAML serialization.
 
 #### Actions:
 - **Add Field** <i data-lucide="plus"></i>: Add a new field to ignore globally
 - **Delete** <i data-lucide="x"></i>: Remove field from ignore list (per field)
+
+### Property Inclusion Mode <i data-lucide="check-circle"></i>
+- Description: Controls which frontmatter properties are included in the episode body sent to Graphiti.
+  - **Permissive (default)**: All frontmatter fields except `Globally Ignored Fields`
+  - **Strict**: Only properties that are enabled/checked in ontology.json for the note's entity type. Falls back to Permissive if the note's type has no ontology entry. Requires Custom Ontologies to be enabled.
+
+### Wikilink Extraction Hints <i data-lucide="check-circle"></i>
+- Description: When enabled, `[[wikilinks]]` found in the note body are injected as entity hints in the LLM extraction instructions. Obsidian wikilinks are the strongest entity signal available — this toggle ensures the LLM treats them as confirmed knowledge graph references. Default: on.
+
+### Episode Contributor <i data-lucide="check-circle"></i>
+- Description: Your name or ID — injected as `mm_contributor` in every episode created by this vault. Useful in shared team databases to track who contributed each piece of knowledge. Applied to Obsidian note syncs, `add_memory`, and `add_conversation_memory`. Leave blank to omit the field.
 
 ## Knowledge Namespacing
 
@@ -333,7 +360,7 @@ Configure how knowledge is organized in the graph database.
 - **Delete** <i data-lucide="x"></i>: Remove folder mapping (per mapping)
 
 ### Enable Property Namespacing <i data-lucide="check-circle"></i>
-- Description: Use g_group_id frontmatter property as namespace when available
+- Description: Use `mm_group_id` frontmatter property as namespace when available. (`g_group_id` is deprecated — still supported with a warning log, but rename to `mm_group_id`.)
 - Developer Note: Property-based namespace detection.
 
 ### Namespace Discovery
@@ -357,126 +384,138 @@ Configure how knowledge is organized in the graph database.
 
 ## Servers
 
-MCP server and connection configuration.
+MCP server configuration. The Servers accordion contains two sub-accordions.
 
-### Obsidian CLI File Tools (Recommended) <i data-lucide="check-circle"></i>
-- Description: Use the Obsidian CLI (v1.12.4+) for all file operations instead of the WebSocket connection layer. **Recommended for all users.** Eliminates startup connection errors, retry loops, and WebSocket contention between multiple MCP clients.
-- Developer Note: When enabled, MCP file tools call `obsidian <command>` as stateless subprocesses. Requires Obsidian 1.12.4+ installer and CLI registered in PATH. Disable to fall back to WebSocket mode.
+> **Obsidian CLI and WebSocket settings** have moved to **Advanced Settings → Obsidian CLI and WebSocket**.
 
-#### Actions:
-- **Verify CLI** <i data-lucide="terminal"></i>: Run `obsidian version` to confirm the CLI binary is accessible on PATH
+### STDIO MCP Server _(sub-accordion)_
 
-### WebSocket Port <i data-lucide="check-circle"></i>
-- Description: Port number for the shared WebSocket server. Only used when "Obsidian CLI File Tools" is disabled.
-- Developer Note: Managed automatically by MCP processes. Not needed when CLI mode is active.
+STDIO mode connects Claude Desktop and other local MCP clients. Launch via your MCP client config — no plugin-side start/stop required.
 
-### Authentication Token <i data-lucide="check-circle"></i>
-- Description: Authentication token for secure WebSocket connections. Only used when "Obsidian CLI File Tools" is disabled.
-- Developer Note: Auto-generated secure token for WebSocket authentication.
+- **Enable STDIO Server** — Toggle STDIO mode on/off. Disable to run in HTTP-only mode. Default: on.
+- **Generate MCP Config** — Generate the `mcpServers` config block for Claude Desktop / local clients.
 
-#### Actions:
-- **Copy** <i data-lucide="copy"></i>: Copy authentication token to clipboard
+### Streamable HTTP Access _(sub-accordion)_ <i data-lucide="check-circle"></i>
 
-### MCP Configuration
-#### Actions:
-- **Generate Config** <i data-lucide="file-text"></i>: Generate configuration for MCP clients to connect to the MCP server
-
-### Streamable HTTP Transport <i data-lucide="check-circle"></i>
-- Description: Opt-in HTTP transport (MCP spec 2025-03-26) that lets Roo Code, Cursor, and other HTTP-capable MCP clients connect directly to MegaMem — without Claude Desktop as a relay.
-- Developer Note: Plugin auto-starts a dedicated HTTP-only process at `/mcp` on port 3838 with Bearer token auth. Claude Desktop stdio process is unchanged. `stateless=True` + `json_response=True` for Roo Code compatibility.
+Opt-in HTTP transport (MCP spec 2025-03-26). Enables Roo Code, Cursor, Claude Code, VS Code, NemoClaw, and any HTTP-capable MCP client to connect directly — without Claude Desktop as a relay. Remote access via Tailscale is supported.
 
 #### Settings:
-- **Enable Streamable HTTP** — Toggle to start/stop the HTTP MCP server alongside the plugin
-- **Port** — Default `3838`. Change if the port is already in use on your machine.
-- **Auth Token** — Auto-generated Bearer token. Copy it into your MCP client config.
+- **Enable Streamable HTTP** — Toggle to start the dedicated HTTP MCP process. Restart after toggling.
+- **HTTP Port** — Default `3838`.
+- **HTTP Server** — Start / Stop buttons for manual control.
 
-#### Actions:
-- **Copy Token** <i data-lucide="copy"></i>: Copy Bearer auth token to clipboard
-- **Regenerate Token** <i data-lucide="refresh-cw"></i>: Generate a new random auth token (old token is immediately invalidated)
-- **Copy MCP Config** <i data-lucide="file-text"></i>: Copy a ready-to-paste `mcpServers` config block (`type: streamable-http`) for Roo Code / Cursor
-- **Start / Stop** <i data-lucide="play"></i>: Manually start or stop the HTTP server process
+#### Token Profiles (Scoped Access) <i data-lucide="check-circle"></i>
 
-### Token Profiles (Scoped Access) <i data-lucide="check-circle"></i>
-- Description: Create per-token allowlists for public-facing connections (e.g., chatbots, agents). Each profile restricts which tools, namespaces, databases, and vaults are accessible. The admin token always has full access.
-- Developer Note: Enforcement happens server-side in the MCP server. Restart the HTTP server after making changes.
+Each profile is a collapsible accordion. The **Admin** profile (always first) has full access. Scoped profiles restrict access for public clients.
 
-#### Per-Profile Settings:
-- **Label** — Friendly name for the token profile (e.g., "mm-endo")
-- **Token** — Bearer token to give to the scoped client. Click **Regenerate** to rotate it.
-- **Allowed Tools** — Checkboxes for each MCP tool. Only checked tools are accessible. Uncheck all = no tools accessible.
-- **Allowed Group IDs** — Comma-separated namespace IDs (e.g., `Public, Shared`). Empty = no namespace restriction (not recommended for public tokens).
-- **Allowed Databases** — Checkboxes for each configured database. Only checked databases are accessible via graph tools. Uncheck all = all databases allowed (no restriction). When a scoped token calls a graph tool without specifying `database_id`, the server auto-injects the first allowed database.
-- **Allowed Vaults** — Checkboxes for each registered Obsidian vault. Only checked vaults are accessible via Obsidian file tools. Uncheck all = all vaults allowed (no restriction). When a scoped token calls a file tool without specifying `vault_id`, the server auto-injects the first allowed vault.
+**Per-Profile Fields:**
+- **Label** — Friendly name (e.g., "Endo"). The MCP server name is auto-generated as `megamem-{slug}` (e.g., `megamem-endo`).
+- **Endpoint URL** — Base URL for this profile. Leave blank for `http://localhost:{port}/mcp`. Enter a full URL for Tailscale remote access (e.g., `https://your-host.ts.net/mcp/`).
+- **Bearer Token** — Auto-generated. Copy or Regenerate. Regenerating live-updates all Copy Config buttons.
+- **Copy Config buttons** — One button per supported client (Roo Code, Claude Desktop, Claude Code, Cursor, VS Code, NemoClaw). Each copies the correctly formatted config for that client.
+- **Access Restrictions** *(scoped profiles only)*:
+  - **Allowed Tools** — Checkboxes per MCP tool.
+  - **Allowed Group IDs** — Comma-separated namespace IDs. Empty = no restriction.
+  - **Allowed Databases** — Checkboxes per configured database. Unchecked all = all allowed.
+  - **Allowed Vaults** — Checkboxes per registered vault. Unchecked all = all allowed.
+
+#### Copy Config Formats:
+
+| Client | Format |
+|--------|--------|
+| **Roo Code** | `streamable-http` type JSON |
+| **Claude Desktop** | `npx mcp-remote` command |
+| **Claude Code** | `claude mcp add` CLI command |
+| **Cursor** | `streamable-http` type JSON |
+| **VS Code** | `servers` key, `http` type JSON |
+| **NemoClaw** | `baseUrl` + `headers` JSON |
 
 #### Actions:
 - **+ Add Profile** — Create a new scoped token profile
-- **Delete** — Remove a token profile (per profile)
-- **Regenerate** — Generate a new token for the profile (invalidates the old one immediately — update the client)
+- **Delete** *(per profile)* — Remove a profile
+- **Regenerate** *(per profile)* — Rotate the token (invalidates the old one immediately)
 
-## Advanced Settings <i data-lucide="settings"></i>
+### Current Instances _(below sub-accordions)_
 
-Advanced configuration options for debugging and performance. Many of the settings here are under development, use at your own risk.
+Shows all active MCP processes (STDIO and HTTP) with their PIDs and ownership status.
 
-### Debug Logging <i data-lucide="check-circle"></i>
-- Description: Enable detailed logging for troubleshooting
-- Developer Note: Comprehensive debug logging system with immediate state updates. Debug logging is less verbose by default to reduce log file size.
+- **Kill Orphans** — Scan for and terminate orphaned MCP processes from previous sessions.
 
-### Log Management
+---
+
+## Advanced Settings Tab
+
+The **Advanced Settings** tab contains the following accordions:
+
+---
+
+### Multi-Vault Mode
+
+> See [Database Configuration → Multi-Vault Mode](#multi-vault-mode) above for full documentation.
+
+---
+
+### Obsidian CLI and WebSocket
+
+CLI and WebSocket configuration for MCP file operations.
+
+#### Obsidian CLI File Tools (Recommended) <i data-lucide="check-circle"></i>
+- **Use Obsidian CLI** — Replace WebSocket file operations with stateless CLI subprocess calls (Obsidian 1.12.4+ required). Eliminates connection errors and startup races. Recommended for all users.
+- Requires Obsidian 1.12.4+ installer + CLI registered in PATH (`Settings → General → CLI → Register`).
+
+#### Shared WebSocket Server <i data-lucide="check-circle"></i>
+- **Enable WebSocket Server** — Required for MCP file tools when CLI mode is off.
+- **WebSocket Port** — Read-only; managed automatically by MCP processes.
+- **Authentication Token** — Auto-generated; copy for manual configuration.
+
+---
+
+### Schema Discovery and UI <i data-lucide="settings"></i>
+
+Advanced schema and UI configuration options. Many are under development.
+
+#### Schema Discovery Options
+- **Auto-discover Schemas** — Automatically scan vault for schema patterns *(planned)*
+- **Validate Naming Conventions** — Check property names against Graphiti best practices *(planned)*
+- **Suggest Property Descriptions** — Auto-generate descriptions for common property names *(planned)*
+- **Protected Attribute Warnings** — Show warnings for Graphiti protected attribute names *(planned)*
+
+#### UI Preferences
+- **Show Sync Status** — Display sync status icons in the note ribbon (per-DB colored icons)
+- **Show Notifications** — Display notifications for sync operations
+
+---
+
+### Auto-Sync <i data-lucide="alert-triangle"></i>
+
+> **WARNING**: Auto-sync is functional but not thoroughly tested. Use at your own risk.
+
+- **Automatically sync notes at scheduled intervals** — Enable auto-sync on save or interval
+- **Sync Options** — New notes only, or new + updated
+- **Sync Interval** — Minutes between auto-sync runs (0 = disabled)
+- **Included Folders** — Folders to include in auto-sync. Leave empty to include all.
+
 #### Actions:
-- **View Logs** <i data-lucide="file-text"></i>: Open the plugin logs directory
+- **Add Folder** / **Delete** — Manage the folder inclusion list
 
-### Manual Testing
-#### Actions:
-- **Select and Sync Note** <i data-lucide="file-plus"></i>: Sync a single note manually to test the connection and process
+---
 
-### Performance Metrics <i data-lucide="wrench"></i>
-- Description: Track and display performance metrics
-- Developer Note: Metrics collection not implemented.
+### Development Options
 
-### Max Retry Attempts <i data-lucide="check-circle"></i>
-- Description: Maximum number of retry attempts for failed operations
-- Developer Note: Configurable retry logic for robust operation.
+Debugging, experimental features, and plugin management.
 
-### Connection Timeout <i data-lucide="check-circle"></i>
-- Description: Connection timeout in seconds
-- Developer Note: Configurable timeout for all connection operations.
+- **View Logs** — Open the plugin logs directory
+- **Max Retry Attempts** — Maximum retry attempts for failed operations
+- **Connection Timeout** — Connection timeout in seconds
+- **Debug Logging** — Enable detailed logging for troubleshooting
+- **Experimental Daemon Mode** — Keep a Python process warm between syncs for faster consecutive processing
+- **Load Daemon on Launch** — Start daemon at plugin load (requires Daemon Mode)
+- **Log Performance** — Enable detailed timing analysis
+- **Export Settings** — Export current settings to a file
+- **Import Settings** — Import settings from a file
+- **Reset to Defaults** — Reset all settings to defaults (⚠️ destructive)
 
-### Auto-discover Schemas <i data-lucide="wrench"></i>
-- Description: Automatically scan vault for schema patterns
-- Developer Note: Schema discovery not implemented.
-
-### Validate Naming Conventions <i data-lucide="wrench"></i>
-- Description: Check property names against Graphiti best practices
-- Developer Note: Validation not implemented.
-
-### Suggest Property Descriptions <i data-lucide="wrench"></i>
-- Description: Auto-generate descriptions for common property names
-- Developer Note: AI suggestions not implemented.
-
-### Protected Attribute Warnings <i data-lucide="wrench"></i>
-- Description: Show warnings for Graphiti protected attribute names
-- Developer Note: Warning system not implemented.
-
-### Show Sync Status <i data-lucide="clock"></i>
-- Description: Display sync status in the status bar
-- Developer Note: UI setting complete, status bar integration not implemented.
-
-### Show Notifications <i data-lucide="clock"></i>
-- Description: Display notifications for sync operations
-- Developer Note: UI setting complete, sync notifications not implemented.
-
-### Compact Mode <i data-lucide="wrench"></i>
-- Description: Use compact UI layout to save space
-- Developer Note: Compact UI styling not implemented.
-
-## Actions
-
-Plugin configuration management.
-
-#### Actions:
-- **Export Settings** <i data-lucide="download"></i>: Export your current settings to a file
-- **Import Settings** <i data-lucide="upload"></i>: Import settings from a file
-- **Reset to Defaults** <i data-lucide="rotate-ccw"></i>: Reset all settings to their default values
+---
 
 ## Updates
 

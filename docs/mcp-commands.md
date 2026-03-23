@@ -109,6 +109,8 @@ Get episodes from the memory graph (aliases: mm, megamem, memory)
 | `group_id` | `string` | Group ID to retrieve episodes from | No | |
 | `last_n` | `integer` | Number of most recent episodes to retrieve | No | `10` |
 
+> **Episode back-references** *(v1.5.5+)*: Episodes created by syncing Obsidian notes include source attribution in the `content` field: `mm_note_path` (vault-relative path), `mm_vault_id` (vault name), `mm_obsidian_url` (deep link for one-click opening), and `mm_contributor` (who synced it). Use `get_episodes()` → parse `mm_note_path` + `mm_vault_id` → call `read_obsidian_note(path, vault_id)` to navigate from graph knowledge back to the source note.
+
 ### `clear_graph`
 
 Clear the entire memory graph (aliases: mm, megamem, memory)

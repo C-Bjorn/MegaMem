@@ -21,14 +21,35 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 ### AI-Powered Knowledge Extraction
 
 - Intelligent entity recognition and relationship mapping
-- Support for multiple LLM providers (OpenAI, Anthropic, Ollama, OpenRouter)
+- Support for multiple LLM providers (OpenAI, Anthropic, Ollama, OpenRouter, Google, Groq, Azure, Venice)
 - Custom ontology support for domain-specific knowledge modeling
+- Content-hash pre-check skips syncs automatically when note content is unchanged
 
 ### Semantic Search
 
 - Vector-based similarity search across your entire vault
 - AI-enhanced query understanding
 - Contextual result ranking and relevance scoring
+
+### 🧠 Unified MegaMem Panel _(v1.5.5)_
+
+A single copper-accented brain icon opens a tabbed side-panel with three sections:
+
+- **Ontology tab** — custom entity/edge type management, Pydantic model generation
+- **Sync tab** — Quick Sync (by note type), Advanced sync (granular selection), per-DB status
+- **Analytics tab** — comprehensive sync analytics dashboard (see below)
+
+### 📊 Sync Analytics Dashboard _(v1.5.5)_
+
+Built on the local SQLite `sync.db`, the Analytics tab delivers full visibility into your sync operations:
+
+- **Summary cards**: Synced Notes, Entities Extracted, Edges Created, Estimated Cost (animated, always shows real data)
+- **Sync Timeline**: Line/area chart — day or hour granularity, toggleable Entities series overlay
+- **Token Usage by Model**: Stacked bar chart with Big Model / Small Model / Both toggle
+- **Model Performance table**: Sortable by any column — includes Provider, Avg Duration, Avg In/Out Tokens, Avg Entities, Avg Edges, Total Cost
+- **Synced Notes accordion**: All sync sessions in the current filter range; expand each row for full detail (InTokens, OutTokens, TotalTokens, Duration, Small Model, error message)
+- **Sync Health**: Recent failures with error messages, stale notes count, duration trend
+- **Cost estimates**: Model Library pricing synced to `model_pricing` on every fetch + on plugin startup; supports all major providers
 
 ### Multi-Database Support
 
@@ -598,9 +619,27 @@ Configure how knowledge is organized in the graph database.
 
 ## Servers
 
-WebSocket and MCP server configuration.
+MCP server configuration. Contains two sub-accordions: **STDIO MCP Server** (for local Claude Desktop/STDIO clients) and **Streamable HTTP Access** (for remote HTTP clients).
 
-### WebSocket Port <i data-lucide="check-circle"></i>
+> **CLI and WebSocket settings** have moved to **Advanced Settings → Obsidian CLI and WebSocket**.
+
+### STDIO MCP Server
+
+- **Enable STDIO Server** — Toggle to enable/disable STDIO mode. Default: on. Disable for HTTP-only deployments.
+- **Generate MCP Config** — Generate the `mcpServers` config block for Claude Desktop and other local MCP clients.
+
+### Streamable HTTP Access <i data-lucide="check-circle"></i>
+
+- **Enable Streamable HTTP** — Opt-in HTTP transport (MCP spec 2025-03-26). Restart after toggling.
+- **HTTP Port** — Default `3838`.
+- **HTTP Server** — Start / Stop buttons for the dedicated HTTP MCP process.
+- **Token Profiles** — Each profile is a collapsible accordion. Admin profile (full access) is first. Per-profile: Endpoint URL, Bearer Token, Copy Config buttons for 6 clients (Roo Code, Claude Desktop, Claude Code, Cursor, VS Code, NemoClaw), and access restrictions (allowed tools/databases/vaults).
+
+### Current Instances
+
+Shows all active STDIO and HTTP MCP processes. **Kill Orphans** removes orphaned processes from previous sessions.
+
+### WebSocket Port _(Advanced Settings → Obsidian CLI and WebSocket)_ <i data-lucide="check-circle"></i>
 
 - Description: Port number for the shared WebSocket server (configured via MCP)
 - Developer Note: Managed automatically by MCP processes.

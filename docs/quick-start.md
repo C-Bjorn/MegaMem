@@ -111,18 +111,25 @@ Two ways to sync:
 ### Step 7: Advanced Configuration (Optional)
 For custom ontologies, set [Knowledge Namespacing](plugin-settings.md#knowledge-namespacing) settings, and review the "Ontology Manager" section.
 
-## 🤖 MCP Server Setup (for Claude Desktop and other private LLM consoles)
+## 🤖 MCP Server Setup
 
-1. **Generate MCP Configuration**
-   - Go to Plugin Settings → Servers section
-   - Click "Generate Config" button
-   - Copy the generated configuration (formatted with `mcpServers` wrapper for Claude Desktop compatibility)
+### Claude Desktop (STDIO — local only)
 
-2. **Apply to Your MCP Client**
-   - For Claude Desktop: Paste the configuration into your `claude_desktop_config.json` file
-   - For other MCP clients: Use the configuration as directed by your client's documentation
-   - Restart your MCP client
-   - Verify connection in chat interface
+1. Go to Plugin Settings → **Servers** → **STDIO MCP Server**
+2. Click **"Generate Config"** and copy the output
+3. Paste into your `claude_desktop_config.json` → restart Claude Desktop
+
+### Roo Code, Cursor, Claude Code, VS Code, NemoClaw (HTTP — local or remote)
+
+1. Go to Plugin Settings → **Servers** → **Streamable HTTP Access**
+2. Toggle **Enable Streamable HTTP** on
+3. Expand the **Admin** token profile accordion
+4. Click the **Copy Config** button for your client (Roo Code, Claude Code, Cursor, VS Code, or NemoClaw)
+5. Paste into your client's MCP config and restart
+
+> **Remote access via Tailscale:** Set the **Endpoint URL** field in your token profile to your Tailscale hostname (e.g., `https://your-host.ts.net/mcp/`) before copying the config.
+
+> **Scoped access:** Add additional Token Profiles under **Streamable HTTP Access** to create restricted bearer tokens for public-facing clients (chatbots, agents). Each profile restricts which tools, databases, and vaults are accessible.
 
 ## ✅ Verification Checklist
 

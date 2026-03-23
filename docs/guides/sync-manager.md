@@ -1,30 +1,32 @@
 ---
-title: Sync Manager
-description: Manage and monitor the synchronization of your Obsidian notes to the MegaMem knowledge graph.
+title: MegaMem Panel — Sync & Analytics
+description: Manage sync operations and explore analytics from the unified MegaMem panel.
 type: guide
 category: Advanced
 difficulty: intermediate
 tags:
   - Sync
+  - Analytics
   - Graph
   - Configuration
   - Data Transfer
-last_updated: 2025-09-23
+last_updated: 2026-03-23
 date_created: 2025-09-23T17:46
-date_updated: 2025-09-28T11:36
+date_updated: 2026-03-23T00:00
 ---
 
-# Sync Manager
+# MegaMem Panel — Sync & Analytics
 
-The MegaMem Sync Manager provides a centralized interface for controlling and observing the synchronization of your Obsidian notes with your knowledge graph. It offers both quick synchronization options for various note categories and a detailed view of ongoing sync processes.
+The unified **MegaMem panel** provides a single tabbed side-panel for all core operations: **Ontology** (custom entity/edge type management), **Sync** (bulk sync operations and status), and **Analytics** (comprehensive sync metrics and cost visibility). It replaces the prior separate Schema Manager and Sync Manager side-panels.
 
-## Accessing the Sync Manager
+## Opening the MegaMem Panel
 
-The Sync Manager can be accessed in three ways:
+The panel can be opened four ways:
 
-1.  **Ribbon Icon**: Click the `refresh-cw` icon in the Obsidian ribbon (left sidebar).
-2.  **Command Palette**: Open the Command Palette (Ctrl/Cmd + P) and search for "Open Sync UI".
-3. **Settings Tab**: Navigate to the MegaMem plugin settings, and under "Sync Configuration", click the "Open Sync UI" button.
+1. **Ribbon Icon**: Click the 🧠 **brain icon** (copper/orange) in the Obsidian ribbon.
+2. **Command Palette**: `MegaMem: Open Panel` (or `Open Sync` / `Open Analytics` / `Open Ontology` to jump directly to a specific tab).
+3. **Settings Tab**: Navigate to the MegaMem plugin settings → Sync Configuration → "Open Sync UI".
+4. **Tab persistence**: The panel remembers the last active tab and restores it on re-open.
 
 ## Overview
 
@@ -96,6 +98,66 @@ Upon completion of a sync operation, a notification will appear in Obsidian:
 
 -   **Success**: `✅ [Sync Type] completed: [X] notes processed`
 -   **Failure**: `❌ [Sync Type] failed: [Error Message]`
+
+## 3. Analytics Tab
+
+The **Analytics** tab provides a comprehensive dashboard for understanding your sync history, token usage, and costs. It reads from the local SQLite `sync.db` file and updates in real time.
+
+### Controls Bar
+
+- **All Databases / specific DB** dropdown — filter all metrics to a single database
+- **Date range presets** — Today, 7d, 30d, All Time
+- **Refresh** button — re-query SQLite on demand
+- **Auto (30s)** toggle — automatic refresh every 30 seconds when the tab is visible
+
+### Summary Cards
+
+Four animated cards show totals for the current filter:
+
+| Card | Source |
+|---|---|
+| **Synced Notes** | `sync_records` COUNT (always populated, even for pre-analytics syncs) |
+| **Entities Extracted** | `SUM(entity_count)` from `sync_analytics` |
+| **Edges Created** | `SUM(edge_count)` from `sync_analytics` |
+| **Estimated Cost** | `SUM(estimated_cost)` from `sync_analytics` × `model_pricing` rates |
+
+> **Cost accuracy:** Pricing data is seeded from your Model Library (Settings → Model Library → Fetch). Fetching populates `model_pricing` with real provider prices. Bundled defaults cover common OpenAI, Anthropic, and Google models.
+
+### Sync Timeline
+
+A line/area chart showing sync count over time (day granularity for 30d/All Time, hour granularity for Today/7d). Toggle the **Entities** overlay series on/off via the chart legend.
+
+### Token Usage by Model
+
+Stacked bar chart with a 3-mode toggle:
+
+- **Big Model** — tokens grouped by primary LLM (`llm_model`) used for extraction
+- **Small Model** — tokens grouped by the secondary/fast LLM (`llm_small_model`)
+- **Both Models** — union of big + small rows, labeled with `(big)`/`(small)` suffixes
+
+> Note: The Python bridge token tracker accumulates all tokens for a sync session. Token counts reflect total session usage, not per-model splits inside a single session.
+
+### Model Performance Table
+
+Sortable table: Model, Provider, Syncs, Avg Duration, Avg In Tokens, Avg Out Tokens, Avg Entities, Avg Edges, Total Cost. Click any column header to sort. Provider is inferred from the `model_pricing` table or stripped from the model ID prefix (e.g. `openai/gpt-4o` → `openai`).
+
+### Synced Notes
+
+Full list of sync sessions in the current date/DB filter (up to 500). Each row shows:
+- Note filename (clickable → opens note in Obsidian), ✓/✗ status icon, Model · Provider, Cost, Synced At
+
+Click any row to **expand** an inline detail panel:
+- DB, Duration, In Tokens, Out Tokens, Total Tokens, Entities, Edges, Small Model, Error message (if failed)
+
+Use the filter input to narrow by note path.
+
+### Sync Health
+
+- Failed sync count with error summaries (last 10)
+- Stale notes count (notes not synced in the past 7 days)
+- Duration trend (7-day rolling averages)
+
+---
 
 ## Sagas
 

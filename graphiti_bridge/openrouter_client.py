@@ -119,6 +119,7 @@ class OpenRouterClient(LLMClient):
         response_model: type[BaseModel] | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         model_size: ModelSize = ModelSize.medium,
+        prompt_name: str | None = None,
     ) -> dict[str, typing.Any]:
         logger = logging.getLogger('graphiti_bridge.sync')
         
@@ -208,6 +209,20 @@ class OpenRouterClient(LLMClient):
             elif _global_response_count % 5 == 0:
                 logger.debug(f"[{_global_response_count}] OpenRouter Responses Served by: {provider}, with Model: {model}")
             
+            # Capture token usage for analytics
+            if hasattr(response, 'usage') and response.usage:
+                try:
+                    input_tokens = getattr(response.usage, 'prompt_tokens', 0) or 0
+                    output_tokens = getattr(response.usage, 'completion_tokens', 0) or 0
+                    if hasattr(self, 'token_tracker') and self.token_tracker:
+                        self.token_tracker.record(
+                            prompt_name or 'openrouter',
+                            input_tokens,
+                            output_tokens,
+                        )
+                except Exception:
+                    pass
+
             result = response.choices[0].message.content or ''
             
             # Check if response is HTML (Cloudflare/infrastructure error)
@@ -265,7 +280,8 @@ class OpenRouterClient(LLMClient):
         while retry_count <= self.MAX_RETRIES:
             try:
                 response = await self._generate_response(
-                    messages, response_model, max_tokens=max_tokens, model_size=model_size
+                    messages, response_model, max_tokens=max_tokens, model_size=model_size,
+                    prompt_name=prompt_name,
                 )
                 return response
             except (RateLimitError, RefusalError):
