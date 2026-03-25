@@ -15,9 +15,14 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Content larger than this threshold is written via eval+tempfile instead of CLI argv.
+# Windows CreateProcess caps the command line at 8191 chars; 4096 is a safe margin.
+_LARGE_CONTENT_THRESHOLD = 4096
 
 # ─── Binary Detection ─────────────────────────────────────────────────────────
 
@@ -198,6 +203,65 @@ class ObsidianCLI:
         """
         return path if path.lower().endswith(".md") else path + ".md"
 
+    def _write_via_eval(self, vault: str, path: str, content: str, verb: str) -> tuple[str, int]:
+        """Write large content via OS temp file + Obsidian eval, bypassing argv size limits.
+        Obsidian runs in Electron — require('fs') is available in the eval context.
+        Temp file is cleaned up inside the JS and again in the Python finally block.
+        @purpose: fix WinError 206 / spawnSync argv overflow for notes > 4096 chars
+        @depends: Obsidian eval command, Node.js fs module, app.vault Obsidian API
+        @results: (stdout, exit_code) matching _run() return signature
+        """
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        try:
+            tmp.write(content)
+            tmp.close()
+            tmp_js = tmp.name.replace("\\", "/")  # POSIX slashes — Node.js accepts on Windows
+            safe_path = path.replace("'", "\\'")
+
+            if verb in ("create", "overwrite"):
+                js = (
+                    f"(async()=>{{ const c=require('fs').readFileSync('{tmp_js}','utf8');"
+                    f" const f=app.vault.getFileByPath('{safe_path}');"
+                    f" if(f) await app.vault.modify(f,c);"
+                    f" else await app.vault.create('{safe_path}',c);"
+                    f" try{{require('fs').unlinkSync('{tmp_js}')}}catch(e){{}} return 'ok'; }})()"
+                )
+            elif verb == "append":
+                js = (
+                    f"(async()=>{{ const c=require('fs').readFileSync('{tmp_js}','utf8');"
+                    f" const f=app.vault.getFileByPath('{safe_path}');"
+                    f" if(f) await app.vault.append(f,c);"
+                    f" try{{require('fs').unlinkSync('{tmp_js}')}}catch(e){{}} return 'ok'; }})()"
+                )
+            elif verb == "prepend":
+                js = (
+                    f"(async()=>{{ const c=require('fs').readFileSync('{tmp_js}','utf8');"
+                    f" const f=app.vault.getFileByPath('{safe_path}');"
+                    f" if(f){{ const ex=await app.vault.read(f); await app.vault.modify(f,c+'\\n'+ex); }}"
+                    f" try{{require('fs').unlinkSync('{tmp_js}')}}catch(e){{}} return 'ok'; }})()"
+                )
+            else:
+                return f"Error: unsupported verb for large write: {verb}", 1
+
+            return self._run(vault, "eval", f"code={js}")
+        finally:
+            try:
+                if os.path.exists(tmp.name):
+                    os.unlink(tmp.name)
+            except Exception:
+                pass
+
+    def _content_cmd(self, vault: str, verb: str, path: str, content: str) -> tuple[str, int]:
+        """Route content write: CLI arg for small content, eval+tempfile for large.
+        verb: 'create' (overwrite), 'append', or 'prepend'
+        """
+        if len(content) > _LARGE_CONTENT_THRESHOLD:
+            return self._write_via_eval(vault, path, content, verb)
+        encoded = _encode_newlines(content)
+        if verb in ("create", "overwrite"):
+            return self._run(vault, "create", f"path={path}", f"content={encoded}", "overwrite")
+        return self._run(vault, verb, f"path={path}", f"content={encoded}")
+
     def version(self) -> str:
         """Return Obsidian version string."""
         out, _ = self._run_global("version")
@@ -368,11 +432,10 @@ class ObsidianCLI:
     ) -> dict:
         """
         Create or overwrite a note. Auto-creates parent directories.
-        Content newlines must be passed as literal \\n to the CLI.
+        Large content (> 4096 chars) is written via eval+tempfile to avoid WinError 206.
         """
         path = self._auto_md(path)
-        cli_content = _encode_newlines(content)
-        out, code = self._run(vault, "create", f"path={path}", f"content={cli_content}", "overwrite")
+        out, code = self._content_cmd(vault, "create", path, content)
         if self._is_error(out, code):
             return self._err(out or "Create failed")
         return self._ok({"path": path, "message": out})
@@ -404,20 +467,19 @@ class ObsidianCLI:
         if editing_mode == "full_file":
             if content is None:
                 return self._err("content required for full_file mode")
-            out, code = self._run(vault, "create", f"path={path}",
-                                  f"content={_encode_newlines(content)}", "overwrite")
+            out, code = self._content_cmd(vault, "create", path, content)
 
         elif editing_mode == "append_only":
             text = append_content or content
             if text is None:
                 return self._err("append_content required for append_only mode")
-            out, code = self._run(vault, "append", f"path={path}", f"content={_encode_newlines(text)}")
+            out, code = self._content_cmd(vault, "append", path, text)
 
         elif editing_mode == "prepend_only":
             text = content or append_content
             if text is None:
                 return self._err("content required for prepend_only mode")
-            out, code = self._run(vault, "prepend", f"path={path}", f"content={_encode_newlines(text)}")
+            out, code = self._content_cmd(vault, "prepend", path, text)
 
         elif editing_mode == "frontmatter_only":
             if not frontmatter_changes:
@@ -438,8 +500,7 @@ class ObsidianCLI:
             lines = read_result["payload"]["content"].split("\n")
             end = (range_end_line) if range_end_line else range_start_line
             lines[range_start_line - 1:end] = replacement_content.split("\n")
-            out, code = self._run(vault, "create", f"path={path}",
-                                  f"content={_encode_newlines(chr(10).join(lines))}", "overwrite")
+            out, code = self._content_cmd(vault, "create", path, chr(10).join(lines))
 
         else:
             return self._err(f"Unsupported editing_mode: {editing_mode}")
@@ -624,7 +685,7 @@ class ObsidianCLI:
 
         # Optionally append user-provided content after template
         if content and created_path:
-            self._run(vault, "append", f"path={created_path}", f"content={_encode_newlines(content)}")
+            self._content_cmd(vault, "append", created_path, content)
 
         return self._ok({
             "path": created_path,
