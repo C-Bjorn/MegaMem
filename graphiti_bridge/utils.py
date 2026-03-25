@@ -149,7 +149,7 @@ def parse_simple_frontmatter(frontmatter_text: str) -> Dict[str, Any]:
                 value = value.lower() == 'true'
             elif value.isdigit():
                 value = int(value)
-            elif value.replace('.', '').isdigit():
+            elif value.count('.') == 1 and value.replace('.', '').isdigit():
                 value = float(value)
 
             frontmatter[key] = value
