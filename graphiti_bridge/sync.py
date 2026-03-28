@@ -48,6 +48,16 @@ try:
 except Exception:
     pass
 
+# UTF-8 stdin encoding for Windows environments (mirrors stdout fix above)
+try:
+    if hasattr(sys, 'stdin') and hasattr(sys.stdin, 'reconfigure'):
+        sys.stdin.reconfigure(encoding='utf-8')
+    else:
+        import io
+        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+except Exception:
+    pass
+
 # Import timing removed - not useful in production
 
 
