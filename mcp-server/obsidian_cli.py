@@ -197,11 +197,18 @@ class ObsidianCLI:
 
     @staticmethod
     def _auto_md(path: str) -> str:
-        """Append .md if the path doesn't already end with .md.
-        Uses endswith check rather than dot-in-basename to avoid false positives
-        on note names like 'Day45.01 - Some Note' which contain dots but have no extension.
+        """Append .md only when the path has no file extension.
+        Uses os.path.splitext to distinguish real extensions (.pdf, .png, .csv)
+        from dotted note stems like 'Day46.01 - Some Note' (no ext → .md appended).
+        Examples:
+          'Day46.01 - Some Note'  → 'Day46.01 - Some Note.md'   (no ext)
+          'notes/my-note'         → 'notes/my-note.md'           (no ext)
+          'file.pdf'              → 'file.pdf'                    (has ext)
+          'image.png'             → 'image.png'                   (has ext)
+          'note.md'               → 'note.md'                     (already .md)
         """
-        return path if path.lower().endswith(".md") else path + ".md"
+        _, ext = os.path.splitext(path)
+        return path if ext else path + ".md"
 
     def _write_via_eval(self, vault: str, path: str, content: str, verb: str) -> tuple[str, int]:
         """Write large content via OS temp file + Obsidian eval, bypassing argv size limits.
@@ -872,6 +879,107 @@ class ObsidianCLI:
             return self._err(out or "Sync trigger failed")
         return self._ok({"message": out, "notePath": note_path})
 
+    # ─── Bases Tools ─────────────────────────────────────────────────────────────
+
+    def list_bases(self, vault: str) -> dict:
+        """List all .base files in the vault.
+        CLI: obsidian bases
+        """
+        out, code = self._run(vault, "bases")
+        if self._is_error(out, code):
+            return self._err(out or "Could not list bases")
+        bases = [p for p in out.strip().splitlines() if p]
+        return self._ok({"bases": bases, "totalBases": len(bases)})
+
+    def list_base_views(
+        self,
+        vault: str,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> dict:
+        """List views in a base file.
+        CLI: obsidian base:views file=<name>  OR  path=<path>
+        For MCP use, always pass explicit file= or path= — never rely on active-file defaults.
+        """
+        args = ["base:views"]
+        if file:
+            args.append(f"file={file}")
+        elif path:
+            args.append(f"path={path}")
+        else:
+            return self._err("file or path required for list_base_views")
+        out, code = self._run(vault, *args)
+        if self._is_error(out, code):
+            return self._err(out or "Could not list base views")
+        views = [v for v in out.strip().splitlines() if v]
+        return self._ok({"views": views, "totalViews": len(views)})
+
+    def query_base(
+        self,
+        vault: str,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        view: Optional[str] = None,
+        format: str = "json",
+    ) -> dict:
+        """Query a base and return structured results.
+        CLI: obsidian base:query file=<name> view=<view> format=<format>
+        When format=json, the stdout is parsed into a Python object before returning.
+        Supported formats: json, csv, tsv, md, paths
+        """
+        args = ["base:query"]
+        if file:
+            args.append(f"file={file}")
+        elif path:
+            args.append(f"path={path}")
+        else:
+            return self._err("file or path required for query_base")
+        if view:
+            args.append(f"view={view}")
+        args.append(f"format={format}")
+        out, code = self._run(vault, *args)
+        if self._is_error(out, code):
+            return self._err(out or "Base query failed")
+        if format == "json":
+            try:
+                parsed = json.loads(out) if out else []
+                return self._ok({"results": parsed, "format": format})
+            except json.JSONDecodeError:
+                # Return raw string if JSON parse fails — CLI may not have returned valid JSON
+                return self._ok({"results": out, "format": format, "parseError": True})
+        return self._ok({"results": out, "format": format})
+
+    def create_base_item(
+        self,
+        vault: str,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        view: Optional[str] = None,
+        name: Optional[str] = None,
+        content: Optional[str] = None,
+    ) -> dict:
+        """Create a new item (row/entry) in a base.
+        CLI: obsidian base:create file=<name> view=<view> name=<name> content=<content>
+        Note: creates items *in* a base, not a new .base file itself.
+        open/newtab flags are omitted — MCP use is always headless.
+        """
+        args = ["base:create"]
+        if file:
+            args.append(f"file={file}")
+        elif path:
+            args.append(f"path={path}")
+        else:
+            return self._err("file or path required for create_base_item")
+        if view:
+            args.append(f"view={view}")
+        if name:
+            args.append(f"name={name}")
+        if content:
+            args.append(f"content={content}")
+        out, code = self._run(vault, *args)
+        if self._is_error(out, code):
+            return self._err(out or "Base item creation failed")
+        return self._ok({"message": out})
 
     # ─── Periodic Notes & Template Mappings ──────────────────────────────────
 

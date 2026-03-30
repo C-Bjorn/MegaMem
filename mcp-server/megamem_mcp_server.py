@@ -120,7 +120,8 @@ OBSIDIAN_FILE_OPERATIONS = {
     "create_note_with_template",
     "manage_obsidian_folders",
     "manage_obsidian_notes",
-    "sync_obsidian_note"
+    "sync_obsidian_note",
+    "manage_obsidian_base",
 }
 
 # --- Token-Scoped Access Control ---
@@ -731,7 +732,49 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                     },
                     "required": ["path"]
                 }
-            )
+            ),
+            Tool(
+                name="manage_obsidian_base",
+                description="Manage Obsidian Bases files — list bases, list views, query data, or create items (aliases: mv, my vault, obsidian, bases)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["list", "views", "query", "create"],
+                            "description": "Operation to perform. 'list': list all .base files (no other params needed). 'views': list views in a base (requires file or path). 'query': query base data and return results (requires file or path; use format param to control output). 'create': create a new item/row in a base (requires file or path)."
+                        },
+                        "file": {
+                            "type": "string",
+                            "description": "Base filename (without extension). Used by: views, query, create."
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Full vault-relative path to the .base file (alternative to file). Used by: views, query, create."
+                        },
+                        "view": {
+                            "type": "string",
+                            "description": "View name within the base. Used by: query (optional), create (optional)."
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["json", "csv", "tsv", "md", "paths"],
+                            "default": "json",
+                            "description": "Output format for query results. json (default) returns parsed structured data. Used by: query."
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Name/title for the new item. Used by: create."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Initial content for the new item. Used by: create."
+                        },
+                        "vault_id": {"type": "string", "description": "Vault ID (optional)"}
+                    },
+                    "required": ["operation"]
+                }
+            ),
         ]
 
     async def process_episode_queue(self, group_id: str):
@@ -1326,10 +1369,10 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                 if k in ("editing_mode", "frontmatter_changes", "append_content", "replacement_content",
                          "range_start_line", "range_start_char", "range_end_line", "range_end_char", "editor_method"):
                     normalized_key = k
-                # Map 'operation' parameter to 'editing_mode' with value mapping for backward compatibility
-                if k == "operation":
+                # Map 'operation' parameter to 'editing_mode' for update_obsidian_note backward compatibility
+                # Do NOT remap for manage_obsidian_base or other tools that use 'operation' natively
+                if k == "operation" and name == "update_obsidian_note":
                     normalized_key = "editing_mode"
-                    # Map Claude's operation values to valid editing_mode values
                     if v == "frontmatter":
                         v = "frontmatter_only"
                     elif v == "append":

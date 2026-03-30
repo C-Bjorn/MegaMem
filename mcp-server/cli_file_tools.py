@@ -262,6 +262,83 @@ class CLIFileTools:
     ) -> Dict[str, Any]:
         return await self.manage_obsidian_folders("delete", folder_path, vault_id)
 
+    # ─── Bases Tools ────────────────────────────────────────────────────────────
+
+    async def manage_obsidian_base(
+        self,
+        operation: str,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        view: Optional[str] = None,
+        format: str = "json",
+        name: Optional[str] = None,
+        content: Optional[str] = None,
+        vault_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Route Bases operations by operation param to the underlying method.
+        operation: 'list' | 'views' | 'query' | 'create'
+        """
+        if operation == "list":
+            return await self.list_bases(vault_id=vault_id)
+        elif operation == "views":
+            return await self.list_base_views(file=file, path=path, vault_id=vault_id)
+        elif operation == "query":
+            return await self.query_base(file=file, path=path, view=view, format=format, vault_id=vault_id)
+        elif operation == "create":
+            return await self.create_base_item(file=file, path=path, view=view, name=name, content=content, vault_id=vault_id)
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown operation '{operation}'. Use 'list', 'views', 'query', or 'create'.",
+                "error_code": "INVALID_OPERATION",
+            }
+
+    async def list_bases(self, vault_id: Optional[str] = None) -> Dict[str, Any]:
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        return await asyncio.to_thread(self.cli.list_bases, vault)
+
+    async def list_base_views(
+        self,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        vault_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        return await asyncio.to_thread(self.cli.list_base_views, vault, file, path)
+
+    async def query_base(
+        self,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        view: Optional[str] = None,
+        format: str = "json",
+        vault_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        return await asyncio.to_thread(self.cli.query_base, vault, file, path, view, format)
+
+    async def create_base_item(
+        self,
+        file: Optional[str] = None,
+        path: Optional[str] = None,
+        view: Optional[str] = None,
+        name: Optional[str] = None,
+        content: Optional[str] = None,
+        vault_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        return await asyncio.to_thread(
+            self.cli.create_base_item, vault, file, path, view, name, content
+        )
+
     # ─── Connected Vault Helpers (replaces WebSocket VaultRegistry API) ──────
 
     def get_connected_vaults(self) -> List[str]:

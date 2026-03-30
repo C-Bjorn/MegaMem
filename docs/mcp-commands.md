@@ -1,10 +1,10 @@
 ---
 date_created: 2025-09-23T18:03
-date_updated: 2026-03-13T00:00
+date_updated: 2026-03-30T00:00
 ---
 # MCP Commands Reference
 
-This document lists all 20 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 9 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 21 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 10 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -166,7 +166,9 @@ List all available group IDs (namespaces) in the vault (aliases: mm, megamem, me
 
 ## Obsidian File Operations (via Obsidian CLI)
 
-> **ℹ️ Architecture Note:** These 9 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.
+> **ℹ️ Architecture Note:** These 10 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.
+>
+> **Non-markdown files supported:** The `_auto_md` fix means `.md` auto-append is skipped when a path already has a recognized extension (`.pdf`, `.png`, `.csv`, `.base`, etc.). All file tools work with non-markdown vault files.
 
 ### `search_obsidian_notes`
 
@@ -193,7 +195,7 @@ Read a specific note from Obsidian (aliases: mv, my vault, obsidian)
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `path` | `string` | Note path. `.md` extension is auto-appended if path has no extension (e.g. `MyNote` → `MyNote.md`) | Yes | |
+| `path`     | `string` | File path in the vault. `.md` is auto-appended only when the path has no extension; non-.md files (`.pdf`, `.png`, `.csv`, `.base`) are passed through as-is. | Yes | |
 | `include_line_map` | `boolean` | Include line-by-line mapping and section detection for precise editing (increases response size ~2x) | No | `false` |
 | `vault_id` | `string` | Vault ID (optional) | No | |
 
@@ -324,3 +326,23 @@ Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
 | `path` | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md` | Yes | |
 | `newPath` | `string` | The new note path (required only for rename operation). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No | |
 | `vault_id` | `string` | Optional vault ID to target specific vault | No | |
+
+### `manage_obsidian_base`
+
+Manage Obsidian Bases `.base` files — list all bases, inspect views, run queries, or create new base files (aliases: mv, my vault, obsidian)
+
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `operation` | `string` | Operation to perform: `list`, `views`, `query`, `create` | Yes | |
+| `path` | `string` | Path to the `.base` file (required for `views`, `query`, and `create`) | No | |
+| `query` | `string` | Query expression to run against the base (used for `query` operation) | No | |
+| `content` | `string` | Base file content (used for `create` operation) | No | |
+| `vault_id` | `string` | Vault ID (optional) | No | |
+
+**Operations:**
+- `list` — list all `.base` files in the vault
+- `views` — return the named views defined in a `.base` file
+- `query` — execute a query against a `.base` file's data
+- `create` — create a new `.base` file at the specified path with the given content

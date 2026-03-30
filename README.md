@@ -24,9 +24,9 @@ The plugin scans your vault's frontmatter and automatically infers entity types,
 
 Configure multiple named graph databases simultaneously — each with its own connection, type (Neo4j/FalkorDB), and embedding model. A **masterVault** runs the MCP server and manages all databases across all registered vaults. Tell Claude which database to query, or let it discover available databases with `list_databases`.
 
-### 🤖 20 MCP Tools for AI Assistants
+### 🤖 21 MCP Tools for AI Assistants
 
-A full MCP server (11 graph tools + 9 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
+A full MCP server (11 graph tools + 10 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
 
 ### 🏗️ Custom Ontology Manager
 
@@ -34,7 +34,7 @@ Define your own entity types, edge types, and property descriptions. Generate Py
 
 ### ⚡ Obsidian CLI Integration
 
-All 9 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter.
+All 10 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter. Non-markdown files (`.pdf`, `.png`, `.csv`, `.base`, etc.) are now fully supported across all file tools.
 
 ### 🌐 Streamable HTTP MCP Transport _(new in v1.4.0)_
 
@@ -66,7 +66,7 @@ MegaMem is **stable in daily production use** and currently in public beta. We'r
 
 ## 🛠️ MCP Tools Reference
 
-All 20 tools are available to Claude Desktop and any MCP-compatible client.
+All 21 tools are available to Claude Desktop and any MCP-compatible client.
 
 ### Graph Operations (11)
 
@@ -84,19 +84,22 @@ All 20 tools are available to Claude Desktop and any MCP-compatible client.
 | `list_databases`          | List all configured database targets — use before routing with `database_id` |
 | `clear_graph`             | Clear the entire memory graph (use with caution)                            |
 
-### Obsidian File Operations (9) — via Obsidian CLI
+### Obsidian File Operations (10) — via Obsidian CLI
 
-| Tool                        | Description                                                            |
-| --------------------------- | ---------------------------------------------------------------------- |
-| `search_obsidian_notes`     | Search vault notes by filename and/or content                          |
-| `read_obsidian_note`        | Read a note's full content (with optional line map for editing)        |
-| `update_obsidian_note`      | Update a note — 5 modes: full file, frontmatter, append, range, editor |
-| `create_obsidian_note`      | Create a new note at a specified path                                  |
-| `list_obsidian_vaults`      | List all registered Obsidian vaults                                    |
-| `explore_vault_folders`     | Explore vault folder structure (tree/flat/paths output)                |
-| `create_note_with_template` | Create a note using a Templater template with intelligent routing      |
-| `manage_obsidian_folders`   | Create, rename, or delete vault folders                                |
-| `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)             |
+> Non-markdown files (`.pdf`, `.png`, `.csv`, `.base`, etc.) are supported across all file tools — the `_auto_md` fix skips `.md` auto-append when the path already has a recognized extension.
+
+| Tool                        | Description                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `search_obsidian_notes`     | Search vault notes by filename and/or content                                      |
+| `read_obsidian_note`        | Read a note's full content (with optional line map for editing)                    |
+| `update_obsidian_note`      | Update a note — 5 modes: full file, frontmatter, append, range, editor             |
+| `create_obsidian_note`      | Create a new note at a specified path                                               |
+| `list_obsidian_vaults`      | List all registered Obsidian vaults                                                 |
+| `explore_vault_folders`     | Explore vault folder structure (tree/flat/paths output)                             |
+| `create_note_with_template` | Create a note using a Templater template with intelligent routing                   |
+| `manage_obsidian_folders`   | Create, rename, or delete vault folders                                             |
+| `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)                          |
+| `manage_obsidian_base`      | Manage Obsidian Bases `.base` files — operations: `list`, `views`, `query`, `create` |
 
 > Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — Updated for v1.5 with `database_id` routing on all graph tools.
 
@@ -249,7 +252,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 - **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
 - **Multi-vault architecture** — masterVault control panel, childVault registration, MCP `database_id` routing, `list_databases` tool _(v1.5)_
 - Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
-- 20 MCP tools — 11 graph operations + 9 Obsidian file tools
+- 21 MCP tools — 11 graph operations + 10 Obsidian file tools (including `manage_obsidian_base` for `.base` files)
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation
