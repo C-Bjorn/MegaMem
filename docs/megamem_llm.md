@@ -31,6 +31,10 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - AI-enhanced query understanding
 - Contextual result ranking and relevance scoring
 
+### 🪄 Templater Company Templates _(v1.6.5)_
+
+`create_note_with_template` now discovers templates from both `templates_folder` (personal) and `company_templates_folder` (Templater fork) automatically. Company templates listed first; same-name templates deduped (company wins). Personal-only users unaffected.
+
 ### 🧠 Unified MegaMem Panel _(v1.5.5)_
 
 A single copper-accented brain icon opens a tabbed side-panel with three sections:
@@ -71,6 +75,7 @@ Built on the local SQLite `sync.db`, the Analytics tab delivers full visibility 
 - Native MCP (Model Context Protocol) server
 - Direct access to vault content from LLM conversations
 - Intelligent note creation and management through AI
+- **MCP Resources** _(v1.6.5)_: `megamem://instructions` (usage guide loaded as system context), `megamem://instructions/reference` (full parameter reference on demand), `megamem://status` (live server health + log tail)
 
 ### Custom Ontologies
 
@@ -789,7 +794,7 @@ Additional settings that appear based on your provider selection:
 
 # MCP Commands Reference
 
-This document lists all 21 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 10 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 22 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 11 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -810,6 +815,7 @@ Add a memory/episode to the graph (aliases: mm, megamem, memory)
 | `group_id`           | `string` | Group ID for organizing memories         | No       |                 |
 | `uuid`               | `string` | Optional UUID for the episode            | No       |                 |
 | `namespace`          | `string` | DEPRECATED: Use group_id instead         | No       | `megamem-vault` |
+| `database_id`        | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |                 |
 
 ### `add_conversation_memory`
 
@@ -823,6 +829,7 @@ Stores conversations in Graphiti memory using the message episode type. Client (
 | `conversation`       | `array`  | Array of message objects (see below) | Yes      |                                               |
 | `group_id`           | `string` | Group ID for organizing memories     | No       |                                               |
 | `source_description` | `string` | Description of conversation source   | No       | `Conversation memory from MCP`                |
+| `database_id`        | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |                                               |
 
 **Message Object Structure:**
 
@@ -858,11 +865,16 @@ Search for nodes in the memory graph (aliases: mm, megamem, memory)
 
 **Parameters:**
 
-| Name        | Type      | Description                             | Required | Default |
-| ----------- | --------- | --------------------------------------- | -------- | ------- |
-| `query`     | `string`  | Search query                            | Yes      |         |
-| `max_nodes` | `integer` | Max results                             | No       | `10`    |
-| `group_ids` | `array`   | Optional list of group IDs to search in | No       |         |
+| Name                 | Type      | Description                                                                      | Required | Default |
+| -------------------- | --------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `query`              | `string`  | Search query                                                                     | Yes      |         |
+| `max_nodes`          | `integer` | Max results                                                                      | No       | `10`    |
+| `group_ids`          | `array`   | Optional list of group IDs to search in                                          | No       |         |
+| `center_node_uuid`   | `string`  | UUID of node to center search around (proximity search)                          | No       |         |
+| `entity_types`       | `array`   | Filter by entity types (e.g., `['Person', 'Company']`)                           | No       |         |
+| `node_labels`        | `array`   | Filter by node label types (e.g. `['Person', 'Organization']`)                   | No       |         |
+| `property_filters`   | `object`  | Filter by specific node/edge properties (e.g. `{"status": "active"}`)            | No       |         |
+| `database_id`        | `string`  | Optional: target a specific named database (id or label). e.g. `'notes-vault'`   | No       |         |
 
 ### `search_memory_facts`
 
@@ -870,11 +882,15 @@ Search for facts/relationships in the memory graph (aliases: mm, megamem, memory
 
 **Parameters:**
 
-| Name        | Type      | Description                             | Required | Default |
-| ----------- | --------- | --------------------------------------- | -------- | ------- |
-| `query`     | `string`  | Search query                            | Yes      |         |
-| `max_facts` | `integer` | Max results                             | No       | `10`    |
-| `group_ids` | `array`   | Optional list of group IDs to search in | No       |         |
+| Name                 | Type      | Description                                                                      | Required | Default |
+| -------------------- | --------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `query`              | `string`  | Search query                                                                     | Yes      |         |
+| `max_facts`          | `integer` | Max results                                                                      | No       | `10`    |
+| `group_ids`          | `array`   | Optional list of group IDs to search in                                          | No       |         |
+| `center_node_uuid`   | `string`  | UUID of node to center search around (proximity search)                          | No       |         |
+| `node_labels`        | `array`   | Filter by node label types (e.g. `['Person', 'Organization']`)                   | No       |         |
+| `property_filters`   | `object`  | Filter by specific node/edge properties (e.g. `{"status": "active"}`)            | No       |         |
+| `database_id`        | `string`  | Optional: target a specific named database (id or label)                         | No       |         |
 
 ### `get_episodes`
 
@@ -882,10 +898,11 @@ Get episodes from the memory graph (aliases: mm, megamem, memory)
 
 **Parameters:**
 
-| Name       | Type      | Description                                | Required | Default |
-| ---------- | --------- | ------------------------------------------ | -------- | ------- |
-| `group_id` | `string`  | Group ID to retrieve episodes from         | No       |         |
-| `last_n`   | `integer` | Number of most recent episodes to retrieve | No       | `10`    |
+| Name          | Type      | Description                                                                      | Required | Default |
+| ------------- | --------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `group_id`    | `string`  | Group ID to retrieve episodes from                                               | No       |         |
+| `last_n`      | `integer` | Number of most recent episodes to retrieve                                       | No       | `10`    |
+| `database_id` | `string`  | Optional: target a specific named database (id or label from Databases settings) | No       |         |
 
 ### `clear_graph`
 
@@ -899,10 +916,12 @@ Get entity edges from the graph (aliases: mm, megamem, memory)
 
 **Parameters:**
 
-| Name          | Type     | Description          | Required | Default |
-| ------------- | -------- | -------------------- | -------- | ------- |
-| `entity_name` | `string` | Entity name          | Yes      |         |
-| `edge_type`   | `string` | Edge type (optional) | No       |         |
+| Name          | Type     | Description                                                                                                                                                                                  | Required | Default |
+| ------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `entity_name` | `string` | Entity name                                                                                                                                                                                  | Yes      |         |
+| `edge_type`   | `string` | Substring filter matched against the `fact` text of each edge (case-insensitive). **Not a strict graph edge-type filter.**                                                                   | No       |         |
+| `group_ids`   | `array`  | Optional list of group IDs to scope the search (prevents cross-group data leakage). When provided, uses hybrid RRF search (limit 25) returning full edge objects; without it uses unscoped backward-compatible search returning trimmed edge objects (`uuid`, `fact`, `source_node_uuid`, `target_node_uuid`, `valid_at`, `invalid_at`). | No       |         |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings)                                                                                                             | No       |         |
 
 ### `delete_entity_edge`
 
@@ -910,9 +929,10 @@ Delete entity edges from the graph (aliases: mm, megamem, memory)
 
 **Parameters:**
 
-| Name   | Type     | Description                       | Required | Default |
-| ------ | -------- | --------------------------------- | -------- | ------- |
-| `uuid` | `string` | UUID of the entity edge to delete | Yes      |         |
+| Name          | Type     | Description                                                                      | Required | Default |
+| ------------- | -------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `uuid`        | `string` | UUID of the entity edge to delete                                                | Yes      |         |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |         |
 
 ### `delete_episode`
 
@@ -920,9 +940,10 @@ Delete an episode from the graph (aliases: mm, megamem, memory)
 
 **Parameters:**
 
-| Name         | Type     | Description          | Required | Default |
-| ------------ | -------- | -------------------- | -------- | ------- |
-| `episode_id` | `string` | Episode ID to delete | Yes      |         |
+| Name          | Type     | Description                                                                      | Required | Default |
+| ------------- | -------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `episode_id`  | `string` | Episode ID to delete                                                             | Yes      |         |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |         |
 
 ### `list_group_ids`
 
@@ -930,9 +951,19 @@ List all available group IDs (namespaces) in the vault (aliases: mm, megamem, me
 
 **Parameters:** None
 
+### `list_databases`
+
+List all configured database targets. Use this to discover which databases are available before querying with `database_id`. (aliases: mm, megamem, memory)
+
+> **AI tip:** Call `list_databases` first when the user refers to a specific vault, project, or database by name. Use the returned `id` to route subsequent graph queries via `database_id`.
+
+**Parameters:** None
+
+**Response includes:** `id`, `label`, `type`, `category`, `enabled`, `vault_id`, `connection` per database.
+
 ## Obsidian File Operations (via Obsidian CLI)
 
-> **ℹ️ Architecture Note:** These 10 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](#quick-start-guide) for setup.
+> **ℹ️ Architecture Note:** These 11 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](#quick-start-guide) for setup.
 >
 > **Non-markdown files supported:** The `_auto_md` fix (Day62) means `.md` auto-append is skipped when a path already carries a recognized extension (`.pdf`, `.png`, `.csv`, `.base`, etc.). All read/create/update/manage operations work with non-markdown vault files.
 
@@ -1028,9 +1059,11 @@ Explore folder structure in an Obsidian vault (query by natural language or path
 | ----------- | --------- | ----------------------------------------- | -------- | ------- | ----- | --- | ------- |
 | `query`     | `string`  | Natural language or path query (optional) | No       |         |
 | `path`      | `string`  | Explicit vault path to explore (optional) | No       |         |
-| `format`    | `string`  | Preferred output format: tree             | flat     | paths   | smart | No  | `smart` |
-| `max_depth` | `integer` | Maximum traversal depth                   | No       | `3`     |
-| `vault_id`  | `string`  | Vault ID (optional)                       | No       |         |
+| `format`           | `string`  | Preferred output format: `tree`, `flat`, `paths`, `smart`                                                             | No       | `smart` |
+| `max_depth`        | `integer` | Maximum traversal depth                                                                                                | No       | `3`     |
+| `include_files`    | `boolean` | Include files in the folder listing alongside folders                                                                  | No       | `false` |
+| `extension_filter` | `array`   | Optional list of file extensions to filter results (e.g. `['md', 'canvas']`). Only used when `include_files: true`.   | No       |         |
+| `vault_id`         | `string`  | Vault ID (optional)                                                                                                    | No       |         |
 
 ### `create_note_with_template`
 
@@ -1068,29 +1101,33 @@ WORKFLOW:
 
 ### `manage_obsidian_folders`
 
-Manage folders in Obsidian vault - create, rename/move, or delete folders (aliases: mv, my vault, obsidian)
+Manage folders in Obsidian vault - create, rename/move, delete, or clone folders (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
-| Name            | Type     | Description                                                                | Required | Default |
-| --------------- | -------- | -------------------------------------------------------------------------- | -------- | ------- |
-| `operation`     | `string` | Folder operation to perform                                                | Yes      |         |
-| `folderPath`    | `string` | Path to the folder (source path for rename/delete, target path for create) | Yes      |         |
-| `newFolderPath` | `string` | New folder path (required only for rename operation)                       | No       |         |
-| `vault_id`      | `string` | Vault ID (optional)                                                        | No       |         |
+| Name            | Type     | Description                                                                           | Required | Default |
+| --------------- | -------- | ------------------------------------------------------------------------------------- | -------- | ------- |
+| `operation`     | `string` | Folder operation: `create`, `rename`, `delete`, `clone`                               | Yes      |         |
+| `folderPath`    | `string` | Path to the folder (source path for rename/delete/clone, target path for create)      | Yes      |         |
+| `newFolderPath` | `string` | New folder path (required for rename and clone operations)                            | No       |         |
+| `vault_id`      | `string` | Vault ID (optional)                                                                   | No       |         |
+
+**Operations:** `create` | `rename` (updates links) | `delete` | `clone` (duplicates entire folder tree via `vault.copy()`, returns `filesCopied`)
 
 ### `manage_obsidian_notes`
 
-Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
+Delete, rename/move, or copy notes in Obsidian vault (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
-| Name        | Type     | Description                                                                                                                              | Required | Default |
-| ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
-| `operation` | `string` | The operation to perform on the note (`rename`, `delete`)                                                                                | Yes      |         |
-| `path`      | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md`               | Yes      |         |
-| `newPath`   | `string` | The new note path (required only for rename). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No       |         |
-| `vault_id`  | `string` | Optional vault ID to target specific vault                                                                                               | No       |         |
+| Name        | Type     | Description                                                                                                                                    | Required | Default |
+| ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `operation` | `string` | The operation to perform: `rename`, `delete`, `copy`                                                                                           | Yes      |         |
+| `path`      | `string` | Note path. `.md` is auto-appended if missing                                                                                                   | Yes      |         |
+| `newPath`   | `string` | Destination path — required for `rename` and `copy`. Cross-folder moves auto-detected for rename.                                             | No       |         |
+| `vault_id`  | `string` | Optional vault ID to target specific vault                                                                                                     | No       |         |
+
+**Operations:** `rename` (updates wikilinks) | `delete` (moves to trash) | `copy` (duplicates to `newPath` via `vault.copy()` — does NOT update wikilinks)
 
 ### `manage_obsidian_base`
 
@@ -1100,17 +1137,31 @@ Manage Obsidian Bases `.base` files — list all bases, inspect views, run queri
 
 | Name        | Type     | Description                                                                    | Required | Default |
 | ----------- | -------- | ------------------------------------------------------------------------------ | -------- | ------- |
-| `operation` | `string` | Operation to perform: `list`, `views`, `query`, `create`                       | Yes      |         |
-| `path`      | `string` | Path to the `.base` file (required for `views`, `query`, and `create`)         | No       |         |
-| `query`     | `string` | Query expression to run against the base (used for `query` operation)          | No       |         |
-| `content`   | `string` | Base file content (used for `create` operation)                                | No       |         |
-| `vault_id`  | `string` | Vault ID (optional)                                                            | No       |         |
+| `operation` | `string` | Operation to perform. `list`: list all `.base` files (no other params needed). `views`: list views in a base (requires `file` or `path`). `query`: query base data and return results (requires `file` or `path`; use `format` to control output). `create`: create a new item/row in a base (requires `file` or `path`). | Yes      |         |
+| `file`      | `string` | Base filename (without extension). Used by: `views`, `query`, `create`.                                                                                                                                                                                                                                                  | No       |         |
+| `path`      | `string` | Full vault-relative path to the `.base` file (alternative to `file`). Used by: `views`, `query`, `create`.                                                                                                                                                                                                               | No       |         |
+| `view`      | `string` | View name within the base. Used by: `query` (optional), `create` (optional).                                                                                                                                                                                                                                             | No       |         |
+| `format`    | `string` | Output format for query results: `json` (default, returns parsed structured data), `csv`, `tsv`, `md`, `paths`. Used by: `query`.                                                                                                                                                                                        | No       | `json`  |
+| `name`      | `string` | Name/title for the new item. Used by: `create`.                                                                                                                                                                                                                                                                          | No       |         |
+| `content`   | `string` | Initial content for the new item. Used by: `create`.                                                                                                                                                                                                                                                                     | No       |         |
+| `vault_id`  | `string` | Vault ID (optional)                                                                                                                                                                                                                                                                                                      | No       |         |
 
 **Operations:**
 - `list` — list all `.base` files in the vault
 - `views` — return the named views defined in a `.base` file
-- `query` — execute a query against a `.base` file's data
-- `create` — create a new `.base` file at the specified path with the given content
+- `query` — execute a query against a `.base` file's data and return results
+- `create` — create a new item/row in an existing `.base` file
+
+### `sync_obsidian_note`
+
+Sync a specific note to MegaMem/Graphiti knowledge graph by path. Opens the note and triggers the registered sync command. Use after updating a note to queue it for sync. Requires Obsidian to be running with MegaMem plugin active. Sync completes asynchronously after this tool returns. (aliases: mv, my vault, obsidian)
+
+**Parameters:**
+
+| Name       | Type     | Description                                                                                                                      | Required | Default |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `path`     | `string` | Vault-relative path to the note (e.g. `'My Notes/SomeNote.md'`). Do NOT use absolute system paths or prefix with the vault folder name. | Yes      |         |
+| `vault_id` | `string` | Vault ID (optional)                                                                                                               | No       |         |
 
 ---
 

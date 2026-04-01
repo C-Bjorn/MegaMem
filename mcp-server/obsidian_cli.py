@@ -661,7 +661,10 @@ class ObsidianCLI:
             " const tp = app.plugins.getPlugin('templater-obsidian').templater;"
             " if (!tp) return JSON.stringify({error: 'Templater not available'});"
             f" const rt = '{safe_request}'.toLowerCase();"
-            " const _f = app.vault.getFiles();"
+            " const _ts = app.plugins.getPlugin('templater-obsidian')?.settings;"
+            " const _tf = [_ts?.templates_folder, _ts?.company_templates_folder].filter(Boolean);"
+            " const _all = app.vault.getFiles();"
+            " const _f = _tf.length ? _all.filter(f => _tf.some(d => f.path.startsWith(d + '/'))) : _all;"
             " const tplFile = _f.find(f => f.basename.toLowerCase() === rt)"
             "   || _f.find(f => f.basename.toLowerCase().startsWith(rt))"
             "   || _f.find(f => f.basename.toLowerCase().includes(rt) || rt.includes(f.basename.toLowerCase()));"
@@ -710,12 +713,14 @@ class ObsidianCLI:
         safe_request = request_type.replace("'", "\\'")
         js = (
             f"(()=>{{ const rt = '{safe_request}'.toLowerCase();"
-            " const _af = app.vault.getFiles();"
+            " const tplSettings = app.plugins.getPlugin('templater-obsidian')?.settings;"
+            " const _tf = [tplSettings?.templates_folder, tplSettings?.company_templates_folder].filter(Boolean);"
+            " const _all = app.vault.getFiles();"
+            " const _af = _tf.length ? _all.filter(f => _tf.some(d => f.path.startsWith(d + '/'))) : _all;"
             " const tplFile = _af.find(f => f.basename.toLowerCase() === rt)"
             "   || _af.find(f => f.basename.toLowerCase().startsWith(rt))"
             "   || _af.find(f => f.basename.toLowerCase().includes(rt) || rt.includes(f.basename.toLowerCase()));"
             " if (!tplFile) return JSON.stringify({folder:''});"
-            " const tplSettings = app.plugins.getPlugin('templater-obsidian')?.settings;"
             " const mappings = tplSettings?.folder_templates || [];"
             " const match = mappings.find(m => {"
             "   const mBase = m.template.split('/').pop().replace(/\\.md$/i,'').toLowerCase();"
@@ -801,11 +806,30 @@ class ObsidianCLI:
                 # Same folder, filename-only rename
                 out, code = self._run(vault, "rename", f"path={path}", f"name={dst_name}.md")
 
+        elif operation == "copy":
+            if not new_path:
+                return self._err("new_path required for copy operation")
+            safe_src = path.replace("'", "\\'")
+            safe_dst = new_path.replace("'", "\\'")
+            js = (
+                f"(async()=>{{"
+                f" const f=app.vault.getFileByPath('{safe_src}');"
+                f" if(!f) return 'Error: source not found: {safe_src}';"
+                f" const copied=await app.vault.copy(f,'{safe_dst}');"
+                f" return copied ? copied.path : 'Error: copy returned null';"
+                f"}})()"
+            )
+            out, code = self._run(vault, "eval", f"code={js}")
+            result_val = out.lstrip("=> ").strip()
+            if self._is_error(out, code) or result_val.startswith("Error:"):
+                return self._err(result_val or f"Copy failed: {path} -> {new_path}")
+            return self._ok({"path": path, "newPath": result_val, "operation": "copy"})
+
         elif operation == "delete":
             out, code = self._run(vault, "delete", f"path={path}")
 
         else:
-            return self._err(f"Unsupported operation: {operation}. Use 'rename' or 'delete'.")
+            return self._err(f"Unsupported operation: {operation}. Use 'rename', 'copy', or 'delete'.")
 
         if self._is_error(out, code):
             return self._err(out or f"Operation '{operation}' failed on: {path}")
@@ -862,8 +886,34 @@ class ObsidianCLI:
                 return self._err(result_val or f"Folder delete failed: {folder_path}")
             return self._ok({"folderPath": folder_path, "operation": "delete"})
 
+        elif operation == "clone":
+            if not new_folder_path:
+                return self._err("new_folder_path required for clone operation")
+            safe_src = folder_path.rstrip("/").replace("'", "\\'")
+            safe_dst = new_folder_path.rstrip("/").replace("'", "\\'")
+            js = (
+                f"(async()=>{{"
+                f" const folder=app.vault.getFolderByPath('{safe_src}');"
+                f" if(!folder) return 'Error: source folder not found: {safe_src}';"
+                f" try {{"
+                f"   const result=await app.vault.copy(folder,'{safe_dst}');"
+                f"   const files=app.vault.getFiles().filter(f=>f.path.startsWith('{safe_dst}/'));"
+                f"   return JSON.stringify({{cloned:'{safe_dst}',files:files.length}});"
+                f" }} catch(e) {{ return 'Error: ' + e.message; }}"
+                f"}})()"
+            )
+            out, code = self._run(vault, "eval", f"code={js}")
+            result_val = out.lstrip("=> ").strip()
+            if self._is_error(out, code) or result_val.startswith("Error:"):
+                return self._err(result_val or f"Clone failed: {folder_path} -> {new_folder_path}")
+            try:
+                data = json.loads(result_val)
+                return self._ok({"folderPath": folder_path, "newFolderPath": data.get("cloned", new_folder_path), "operation": "clone", "filesCopied": data.get("files", 0)})
+            except Exception:
+                return self._ok({"folderPath": folder_path, "newFolderPath": new_folder_path, "operation": "clone"})
+
         else:
-            return self._err(f"Unsupported folder operation: {operation}. Use 'create', 'rename', or 'delete'.")
+            return self._err(f"Unsupported folder operation: {operation}. Use 'create', 'rename', 'delete', or 'clone'.")
 
     # ─── Bonus: trigger_sync ──────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 ---
 date_created: 2025-09-23T18:03
-date_updated: 2026-03-30T00:00
+date_updated: 2026-04-01T00:00
 ---
 # MCP Commands Reference
 
@@ -282,8 +282,14 @@ INTELLIGENT ROUTING:
 
 SERVER-SIDE FOLDER RESOLUTION (when `target_folder` is omitted):
 1. **Templater mapping** — checks `folder_templates` in Templater plugin settings; fuzzy-matches template basename
-2. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
-3. **Vault root** — final fallback if no mapping and no inboxFolder configured
+2. **Periodic Notes** — matches template name against Periodic Notes config; calculates date-expanded folder path
+3. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
+4. **Vault root** — final fallback if no mapping and no inboxFolder configured
+
+DUAL-FOLDER TEMPLATE DISCOVERY:
+- Template list is built from both `templates_folder` (personal) and `company_templates_folder` (company) in Templater settings
+- Company templates listed first; same-name templates deduped (company wins)
+- If `company_templates_folder` is not configured, behaves identically to previous behavior
 
 WORKFLOW:
 1. Read the created note to understand its structure
@@ -303,29 +309,40 @@ WORKFLOW:
 
 ### `manage_obsidian_folders`
 
-Manage folders in Obsidian vault - create, rename/move, or delete folders (aliases: mv, my vault, obsidian)
+Manage folders in Obsidian vault - create, rename/move, delete, or clone folders (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `operation` | `string` | Folder operation to perform | Yes | |
-| `folderPath` | `string` | Path to the folder (source path for rename/delete, target path for create) | Yes | |
-| `newFolderPath` | `string` | New folder path (required only for rename operation) | No | |
+| `operation` | `string` | Folder operation: `create`, `rename`, `delete`, `clone` | Yes | |
+| `folderPath` | `string` | Path to the folder (source path for rename/delete/clone, target path for create) | Yes | |
+| `newFolderPath` | `string` | New folder path (required for rename and clone operations) | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
+
+**Operations:**
+- `create` — create a new folder
+- `rename` — rename or move to a new path (updates all internal links)
+- `delete` — delete folder and all contents
+- `clone` — duplicate the entire folder tree to a new path using `vault.copy()`. Returns `filesCopied` count.
 
 ### `manage_obsidian_notes`
 
-Delete or rename/move notes in Obsidian vault (aliases: mv, my vault, obsidian)
+Delete, rename/move, or copy notes in Obsidian vault (aliases: mv, my vault, obsidian)
 
 **Parameters:**
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `operation` | `string` | The operation to perform on the note (`rename`, `delete`) | Yes | |
-| `path` | `string` | The note path for delete operation, or the old path for rename. `.md` is auto-appended if the path does not end with `.md` | Yes | |
-| `newPath` | `string` | The new note path (required only for rename operation). Cross-folder moves are automatically detected and dispatched as `move` + optional `rename` | No | |
+| `operation` | `string` | The operation to perform: `rename`, `delete`, `copy` | Yes | |
+| `path` | `string` | The note path. `.md` is auto-appended if missing | Yes | |
+| `newPath` | `string` | Destination path — required for `rename` and `copy`. Cross-folder moves auto-detected for rename. | No | |
 | `vault_id` | `string` | Optional vault ID to target specific vault | No | |
+
+**Operations:**
+- `rename` — rename or move note; updates internal wikilinks
+- `delete` — move to trash
+- `copy` — duplicate note to `newPath` using `vault.copy()`. Does NOT update wikilinks (source links unchanged).
 
 ### `manage_obsidian_base`
 
@@ -346,3 +363,21 @@ Manage Obsidian Bases `.base` files — list all bases, inspect views, run queri
 - `views` — return the named views defined in a `.base` file
 - `query` — execute a query against a `.base` file's data
 - `create` — create a new `.base` file at the specified path with the given content
+
+---
+
+## MCP Resources _(v1.6.5)_
+
+MegaMem exposes three read-only MCP resources. Access them with `read_resource` in any MCP-compatible client.
+
+### `megamem://instructions`
+
+Concise usage guide (22 tools, shorthands, key behaviors). Loaded automatically by Claude as the server's system prompt context.
+
+### `megamem://instructions/reference`
+
+Full parameter reference for all 22 tools. Load on demand when you need complete parameter details for a specific tool.
+
+### `megamem://status`
+
+Live server status snapshot: connected vaults + database IDs, Graphiti health, embedder health, Python bridge version, MCP server version, and the last 40 lines of the consolidated log.

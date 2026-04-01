@@ -51,7 +51,251 @@ except Exception as e:
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 import mcp.types as types
+
+# ---------------------------------------------------------------------------
+# MCP Resource content — synced from vault on each release
+# Source: 06_Resources/LLM/Skills/ClaudeDesktop/megamem/SKILL.md (body only)
+# ---------------------------------------------------------------------------
+MEGAMEM_INSTRUCTIONS = """\
+# megamem
+
+22 MCP tools in two categories. Shorthand: **"mm"** / **"my memory"** = graph tools. **"mv"** / **"my vault"** = Obsidian tools.
+
+> For full parameter details on any tool, load: megamem://instructions/reference
+
+## Ground Rules
+
+**group_id** — Always leave blank. Blank = connected vault's name (default). Only set if user explicitly asks to target a namespace. If so, call `list_group_ids` first to confirm the exact value.
+
+**database_id** — Always leave blank (uses default database). Only set if user explicitly names a different database. If so, call `list_databases` first to get the correct `id`.
+
+**Destructive ops** — Always confirm before running `delete_episode`, `delete_entity_edge`, `clear_graph`, `manage_obsidian_notes delete`, `manage_obsidian_folders delete`.
+
+## Key Behaviors
+
+**Creating a note** → prefer `create_note_with_template` when a suitable template exists. Use `create_obsidian_note` only if no template fits.
+
+**Remembering a fact** → `add_memory`. Remembering a conversation → `add_conversation_memory`.
+
+**Syncing a vault note to graph** → `sync_obsidian_note` with vault-relative path (e.g. `Folder/Note.md`). Requires Obsidian running. This is NOT `add_memory` — it pushes an existing note into the graph asynchronously.
+
+**Searching** → `search_obsidian_notes` for vault files. `search_memory_facts` or `search_memory_nodes` for graph knowledge.
+
+**Editing a note** → always `read_obsidian_note` first. For `full_file` overwrites AND `range_based` edits use `include_line_map: true` to get exact line numbers. Avoid `frontmatter_only` for array fields — use `full_file` instead.
+
+**Editing a `.base` file structure** → use `update_obsidian_note` with `full_file`. Use `manage_obsidian_base` for querying/listing only.
+
+**group_ids in search** — `search_memory_facts` and `search_memory_nodes` take `group_ids` as an **array**: `["namespace"]`.
+
+## On-Demand Skills
+
+For vault-native skill discovery and loading, use the **megamem-skills** skill (trigger: `mms`, `mmskill`, `mm skills`)."""
+
+# ---------------------------------------------------------------------------
+# Source: 06_Resources/LLM/Skills/ClaudeDesktop/megamem/references/reference.md
+# ---------------------------------------------------------------------------
+MEGAMEM_REFERENCE = """\
+# MegaMem MCP — Full Parameter Reference
+
+Complete parameter reference for all MegaMem MCP tools. Load this file when you need exact parameter names, types, or constraints not covered in the main instructions.
+
+---
+
+## Graph Memory Tools (mm)
+
+### `add_memory`
+| Param | Required | Notes |
+|---|---|---|
+| `name` | Yes | Episode name |
+| `content` | Yes | Memory content |
+| `source` | No | text / json / message (default: text) |
+| `source_description` | No | |
+| `group_id` | No | Leave blank = default |
+| `uuid` | No | |
+| `database_id` | No | Leave blank = default |
+
+### `add_conversation_memory`
+| Param | Required | Notes |
+|---|---|---|
+| `conversation` | Yes | Array of `{ role: "user"\\|"assistant", content: string, timestamp?: ISO 8601 }` |
+| `name` | No | Auto-generated if omitted |
+| `group_id` | No | |
+| `source_description` | No | Default: "Conversation memory from MCP" |
+| `database_id` | No | |
+
+### `search_memory_facts`
+| Param | Required | Notes |
+|---|---|---|
+| `query` | Yes | |
+| `max_facts` | No | Default 10 |
+| `group_ids` | No | Array — e.g. `["namespace"]` |
+| `center_node_uuid` | No | |
+| `node_labels` | No | |
+| `property_filters` | No | |
+| `database_id` | No | |
+
+### `search_memory_nodes`
+| Param | Required | Notes |
+|---|---|---|
+| `query` | Yes | |
+| `max_nodes` | No | Default 10 |
+| `group_ids` | No | Array — e.g. `["namespace"]` |
+| `center_node_uuid` | No | |
+| `entity_types` | No | |
+| `node_labels` | No | |
+| `property_filters` | No | |
+| `database_id` | No | |
+
+### `get_episodes`
+| Param | Required | Notes |
+|---|---|---|
+| `group_id` | No | |
+| `last_n` | No | Default 10 |
+| `database_id` | No | |
+
+### `get_entity_edge`
+| Param | Required | Notes |
+|---|---|---|
+| `entity_name` | Yes | |
+| `edge_type` | No | Substring match, not strict filter |
+| `group_ids` | No | Array |
+| `database_id` | No | |
+
+### `delete_episode`
+⚠️ Destructive — confirm before use.
+| Param | Required | Notes |
+|---|---|---|
+| `episode_id` | Yes | UUID |
+| `database_id` | No | |
+
+### `delete_entity_edge`
+⚠️ Destructive — confirm before use.
+| Param | Required | Notes |
+|---|---|---|
+| `uuid` | Yes | |
+| `database_id` | No | |
+
+### `list_group_ids`
+No parameters.
+
+### `list_databases`
+No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as `database_id`.
+
+### `clear_graph`
+⚠️ Destructive — always confirm first. No parameters.
+
+---
+
+## Vault Tools (mv)
+
+### `read_obsidian_note`
+| Param | Required | Notes |
+|---|---|---|
+| `path` | Yes | Vault-relative path |
+| `include_line_map` | No | Set `true` before range_based edits (~2x response size) |
+| `vault_id` | No | |
+
+### `create_obsidian_note`
+| Param | Required | Notes |
+|---|---|---|
+| `path` | Yes | Full vault-relative path including `.md` |
+| `content` | Yes | |
+| `vault_id` | No | |
+
+### `update_obsidian_note`
+| Param | Required | Notes |
+|---|---|---|
+| `path` | Yes | |
+| `editing_mode` | No | `full_file` (default), `frontmatter_only`, `append_only`, `range_based`, `editor_based` |
+| `content` | full_file | Full replacement content |
+| `frontmatter_changes` | frontmatter_only | Object of properties to update. ⚠️ Avoid for array fields — use `full_file` instead |
+| `append_content` | append_only | |
+| `replacement_content` | range_based | |
+| `range_start_line` | range_based | 1-based |
+| `range_start_char` | range_based | 0-based |
+| `range_end_line` | range_based | Optional |
+| `range_end_char` | range_based | Optional |
+| `editor_method` | editor_based | |
+| `vault_id` | No | |
+
+### `create_note_with_template`
+| Param | Required | Notes |
+|---|---|---|
+| `request_type` | Yes | Template name — fuzzy matched |
+| `file_name` | Yes | Note title, no `.md` extension |
+| `content` | No | Appended after template renders |
+| `target_folder` | No | Omit to let template routing handle placement |
+| `vault_id` | No | |
+
+### `search_obsidian_notes`
+| Param | Required | Notes |
+|---|---|---|
+| `query` | Yes | |
+| `search_mode` | No | `filename` / `content` / `both` (default) |
+| `max_results` | No | Default 100 |
+| `include_context` | No | Default true |
+| `path` | No | Scope to folder |
+| `vault_id` | No | |
+
+### `sync_obsidian_note`
+| Param | Required | Notes |
+|---|---|---|
+| `path` | Yes | Vault-relative only. No absolute paths. No vault folder prefix. |
+| `vault_id` | No | |
+
+Obsidian must be running with MegaMem active. Sync is asynchronous. This is NOT `add_memory`.
+
+### `manage_obsidian_notes`
+| Param | Required | Notes |
+|---|---|---|
+| `operation` | Yes | `rename`, `delete`, `copy` |
+| `path` | Yes | |
+| `newPath` | rename / copy | Cross-folder moves auto-detected for rename. For `copy`: destination path for the new file. |
+| `vault_id` | No | |
+
+Note: `copy` does NOT update wikilinks (unlike `rename`) — this is expected behavior.
+
+### `manage_obsidian_folders`
+| Param | Required | Notes |
+|---|---|---|
+| `operation` | Yes | `create`, `rename`, `delete`, `clone` |
+| `folderPath` | Yes | Note: `folderPath` not `path` |
+| `newFolderPath` | rename / clone | Destination path for renamed or cloned folder. |
+| `vault_id` | No | |
+
+Note: `clone` deep-copies the entire folder tree using `vault.copy()`. Returns `filesCopied` count. Does NOT update wikilinks.
+
+### `manage_obsidian_base`
+| Param | Required | Notes |
+|---|---|---|
+| `operation` | Yes | `list`, `views`, `query`, `create` |
+| `file` | views/query/create | Basename without extension (alternative to `path`) |
+| `path` | views/query/create | Full vault-relative path (alternative to `file`) |
+| `view` | No | View name — used by `query` and `create` |
+| `format` | No | query output: `json` (default), `csv`, `tsv`, `md`, `paths` |
+| `name` | No | create: item name |
+| `content` | No | create: initial content |
+| `vault_id` | No | |
+
+⚠️ Use for querying/listing only. For structural YAML edits to a `.base` file, use `update_obsidian_note` with `full_file`.
+
+Tag filter syntax: `file.tags.containsAny("tagname")`
+
+### `explore_vault_folders`
+| Param | Required | Notes |
+|---|---|---|
+| `query` | No | |
+| `path` | No | Scope to folder |
+| `format` | No | `tree` / `flat` / `paths` / `smart` (default) |
+| `max_depth` | No | Default 3 |
+| `include_files` | No | Default false |
+| `extension_filter` | No | Filter by file type |
+| `vault_id` | No | |
+
+### `list_obsidian_vaults`
+No parameters."""
 
 # --- Graphiti Core Imports ---
 try:
@@ -159,8 +403,8 @@ def _get_available_templates(vault_path: str) -> str:
     """
     Scan vault for Templater template files and return a formatted list
     for injection into the create_note_with_template tool description.
-    Mirrors PluginDetectionHelper.ts readTemplaterConfig pattern:
-      templates_folder = anyRaw.templates_folder || anyRaw.settings?.templates_folder
+    Reads both templates_folder (personal) and company_templates_folder from Templater data.json.
+    Company templates listed first, personal appended — deduped by stem (company wins).
     Falls back gracefully if vault path or templates folder is unavailable — never throws.
     @purpose: Live template discovery at startup @depends: vault_path, Templater data.json @results: Formatted template list string for tool description
     """
@@ -174,26 +418,30 @@ def _get_available_templates(vault_path: str) -> str:
             tdata = json.load(f)
 
         # Mirror PluginDetectionHelper.ts: check top-level first, then settings sub-object
-        templates_folder = (
+        personal_folder = (
             tdata.get("templates_folder") or
             (tdata.get("settings") or {}).get("templates_folder")
         )
-        if not templates_folder:
+        if not personal_folder:
             raise ValueError("Templater templates_folder not configured in data.json")
 
-        tpl_dir = vault / templates_folder
-        if not tpl_dir.is_dir():
-            raise FileNotFoundError(f"Templates folder not found: {tpl_dir}")
+        company_folder = tdata.get("company_templates_folder") or ""
 
-        names = sorted(
-            p.stem for p in tpl_dir.glob("*.md")
-            if p.stem.upper().startswith("TPL ")
-        )
+        def _scan(folder: str) -> list:
+            d = vault / folder
+            return sorted(p.stem for p in d.glob("*.md")) if d.is_dir() else []
+
+        company_names = _scan(company_folder) if company_folder else []
+        personal_names = _scan(personal_folder)
+
+        # Company first; dedupe — personal name dropped if company already has it
+        seen = set(company_names)
+        names = company_names + [n for n in personal_names if n not in seen]
+
         if not names:
-            raise ValueError(f"No TPL *.md files found in {templates_folder}")
+            raise ValueError("No template files found in configured template folders")
 
-        template_list = ", ".join(names)
-        return f"Available templates (use exact name or close match):\n  {template_list}"
+        return f"Available templates (use exact name or close match):\n  {', '.join(names)}"
     except Exception:
         return "Available templates: scan unavailable — use TPL + type name (e.g. TPL Person, TPL Note, TPL Meeting)"
 
@@ -320,26 +568,54 @@ class ObsidianMegaMemMCPServer:
 
         @self.server.list_resources()
         async def list_resources() -> List[types.Resource]:
-            """Return health check resource"""
-            return [types.Resource(
-                uri="megamem://status",
-                name="MegaMem Server Status",
-                description="Health check for Graphiti and Obsidian connections"
-            )]
+            return [
+                types.Resource(
+                    uri="megamem://status",
+                    name="MegaMem Server Status",
+                    description="Health check for Graphiti and Obsidian connections"
+                ),
+                types.Resource(
+                    uri="megamem://instructions",
+                    name="MegaMem Instructions",
+                    description="Behavioral rules and shorthands for all MegaMem MCP tools. Read at session start.",
+                    mimeType="text/markdown"
+                ),
+                types.Resource(
+                    uri="megamem://instructions/reference",
+                    name="MegaMem Reference",
+                    description="Full parameter reference for all MegaMem tools. Load on demand when exact params needed.",
+                    mimeType="text/markdown"
+                ),
+            ]
 
         @self.server.read_resource()
-        async def read_resource(uri: str) -> str:
-            """Read health check resource"""
-            if uri == "megamem://status":
+        async def read_resource(uri) -> list[ReadResourceContents]:
+            # str(uri) handles both plain str and Pydantic AnyUrl; rstrip('/') handles trailing-slash normalization
+            uri_str = str(uri).rstrip('/')
+            if uri_str == "megamem://status":
                 status = {
                     "graphiti": "ok" if self.megamem_client and self.megamem_client != "RPC_MODE" else "disconnected",
                     "obsidian": "ok" if self.file_tools else "disconnected",
                     "database": self.bridge_config.database_type if self.bridge_config else "unknown"
                 }
-                
-                return json.dumps(status, indent=2)
-            
-            raise ValueError(f"Unknown resource URI: {uri}")
+                config_path = os.environ.get("OBSIDIAN_CONFIG_PATH", "")
+                if config_path:
+                    log_path = Path(config_path).parent / "logs" / "consolidated.log"
+                    try:
+                        if log_path.exists():
+                            lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                            status["recent_log"] = lines[-100:]
+                    except Exception:
+                        pass
+                return [ReadResourceContents(content=json.dumps(status, indent=2), mime_type="application/json")]
+
+            if uri_str == "megamem://instructions":
+                return [ReadResourceContents(content=MEGAMEM_INSTRUCTIONS, mime_type="text/markdown")]
+
+            if uri_str == "megamem://instructions/reference":
+                return [ReadResourceContents(content=MEGAMEM_REFERENCE, mime_type="text/markdown")]
+
+            raise ValueError(f"Unknown resource URI: {uri_str}")
 
     def _get_megamem_tool_definitions(self) -> List[Tool]:
         """Define all 9 Graphiti tools"""
@@ -672,22 +948,22 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
             ),
             Tool(
                 name="manage_obsidian_folders",
-                description="Manage folders in Obsidian vault - create, rename/move, or delete folders (aliases: mv, my vault, obsidian)",
+                description="Manage folders in Obsidian vault - create, rename/move, delete, or clone folders (aliases: mv, my vault, obsidian)",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "operation": {
                             "type": "string",
-                            "enum": ["create", "rename", "delete"],
-                            "description": "Folder operation to perform"
+                            "enum": ["create", "rename", "delete", "clone"],
+                            "description": "Folder operation to perform. 'clone' duplicates the entire folder tree to a new path."
                         },
                         "folderPath": {
                             "type": "string",
-                            "description": "Path to the folder (source path for rename/delete, target path for create)"
+                            "description": "Path to the folder (source path for rename/delete/clone, target path for create)"
                         },
                         "newFolderPath": {
                             "type": "string",
-                            "description": "New folder path (required only for rename operation)"
+                            "description": "New folder path (required for rename and clone operations)"
                         },
                         "vault_id": {"type": "string", "description": "Vault ID (optional)"}
                     },
@@ -696,22 +972,22 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
             ),
             Tool(
                 name="manage_obsidian_notes",
-                description="Delete or rename notes in Obsidian vault (aliases: mv, my vault, obsidian)",
+                description="Delete, rename, or copy notes in Obsidian vault (aliases: mv, my vault, obsidian)",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "operation": {
                             "type": "string",
-                            "enum": ["delete", "rename"],
-                            "description": "The operation to perform on the note"
+                            "enum": ["delete", "rename", "copy"],
+                            "description": "The operation to perform. 'copy' duplicates the note to newPath (can include a new filename to rename on copy)."
                         },
                         "path": {
                             "type": "string",
-                            "description": "The note path for delete operation, or the old path for rename"
+                            "description": "The note path for delete/copy, or the old path for rename"
                         },
                         "newPath": {
                             "type": "string",
-                            "description": "The new note path (required only for rename operation)"
+                            "description": "The destination path (required for rename and copy operations)"
                         },
                         "vault_id": {
                             "type": "string",
@@ -1900,10 +2176,17 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                 result = await self.file_tools.rename_obsidian_folder(folder_path, new_folder_path, vault_id)
             elif operation == "delete":
                 result = await self.file_tools.delete_obsidian_folder(folder_path, vault_id)
+            elif operation == "clone":
+                if not new_folder_path:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": "Missing required parameter 'newFolderPath' for clone operation"
+                    }))]
+                result = await self.file_tools.manage_obsidian_folders("clone", folder_path, vault_id, new_folder_path)
             else:
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": False,
-                    "error": f"Invalid operation '{operation}'. Must be one of: create, rename, delete"
+                    "error": f"Invalid operation '{operation}'. Must be one of: create, rename, delete, clone"
                 }))]
 
             return [types.TextContent(type="text", text=json.dumps(result))]
@@ -1945,10 +2228,17 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                         "error": "Missing required parameter 'newPath' for rename operation"
                     }))]
                 result = await self.file_tools.rename_obsidian_note(path, new_path, vault_id)
+            elif operation == "copy":
+                if not new_path:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": "Missing required parameter 'newPath' for copy operation"
+                    }))]
+                result = await self.file_tools.manage_obsidian_notes("copy", path, vault_id, new_path)
             else:
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": False,
-                    "error": f"Invalid operation '{operation}'. Must be one of: delete, rename"
+                    "error": f"Invalid operation '{operation}'. Must be one of: delete, rename, copy"
                 }))]
 
             return [types.TextContent(type="text", text=json.dumps(result))]
