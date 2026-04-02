@@ -784,12 +784,12 @@ class ObsidianMegaMemMCPServer:
                             "description": "Search mode: filename, content, or both"
                         },
                         "max_results": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "default": 100,
                             "description": "Maximum number of results to return"
                         },
                         "include_context": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "default": True,
                             "description": "Include context snippets for content matches"
                         },
@@ -808,7 +808,7 @@ class ObsidianMegaMemMCPServer:
                         "path": {"type": "string", "description": "Note path"},
                         "vault_id": {"type": "string", "description": "Vault ID (optional)"},
                         "include_line_map": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "default": False,
                             "description": "Include line-by-line mapping and section detection for precise editing (increases response size ~2x)"
                         }
@@ -831,8 +831,7 @@ class ObsidianMegaMemMCPServer:
                         },
                         "content": {"type": "string", "description": "New content (used for full_file mode)"},
                         "frontmatter_changes": {
-                            "type": "object",
-                            "description": "Object containing frontmatter properties to update (used for frontmatter_only mode). WARNING: Do NOT pass array values (e.g. tags) via frontmatter_changes — the YAML serializer will drop the closing --- fence, corrupting the file. For any update that includes array fields, use full_file mode instead."
+                            "description": "Object containing frontmatter properties to update (used for frontmatter_only mode). Pass as an object or JSON string. WARNING: Do NOT pass array values (e.g. tags) via frontmatter_changes — the YAML serializer will drop the closing --- fence, corrupting the file. For any update that includes array fields, use full_file mode instead."
                         },
                         "append_content": {
                             "type": "string",
@@ -843,19 +842,19 @@ class ObsidianMegaMemMCPServer:
                             "description": "Content to replace within the specified range (used for range_based mode)"
                         },
                         "range_start_line": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Starting line number (1-based) for range replacement"
                         },
                         "range_start_char": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Starting character position (0-based) within the start line"
                         },
                         "range_end_line": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Ending line number (1-based) for range replacement (optional, defaults to start_line)"
                         },
                         "range_end_char": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Ending character position (0-based) within the end line (optional, defaults to end of line)"
                         },
                         "editor_method": {
@@ -905,7 +904,7 @@ class ObsidianMegaMemMCPServer:
                             "default": "smart"
                         },
                         "max_depth": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Maximum traversal depth",
                             "default": 3
                         },
@@ -914,7 +913,7 @@ class ObsidianMegaMemMCPServer:
                             "description": "Vault ID (optional)"
                         },
                         "include_files": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "description": "Include files in the folder listing alongside folders. Default false.",
                             "default": False
                         },
@@ -1691,6 +1690,29 @@ WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_no
                     normalized_key = "content"
 
                 normalized_args[normalized_key] = v
+
+            # Coerce string-serialized args to correct native types.
+            # Some Agent SDK frameworks stringify all non-string params before sending.
+            _COERCE_INT  = {"range_start_line", "range_start_char", "range_end_line",
+                            "range_end_char", "max_results", "max_depth"}
+            _COERCE_BOOL = {"include_line_map", "include_context", "include_files"}
+            _COERCE_JSON = {"frontmatter_changes"}
+            for _k in list(normalized_args.keys()):
+                _v = normalized_args[_k]
+                if not isinstance(_v, str):
+                    continue
+                if _k in _COERCE_INT:
+                    try:
+                        normalized_args[_k] = int(_v)
+                    except (ValueError, TypeError):
+                        pass
+                elif _k in _COERCE_BOOL:
+                    normalized_args[_k] = _v.lower() in ("true", "1", "yes")
+                elif _k in _COERCE_JSON:
+                    try:
+                        normalized_args[_k] = json.loads(_v)
+                    except (ValueError, TypeError):
+                        pass
 
             result = await method(**normalized_args)
             return [types.TextContent(type="text", text=json.dumps(result, indent=2))]

@@ -134,7 +134,10 @@ class FileTools:
             logger.info(
                 f"[SEARCH] Could not coerce max_results '{max_results}' to int; defaulting to 100")
             max_results = 100
-        include_context = bool(include_context)
+        if isinstance(include_context, str):
+            include_context = include_context.lower() in ("true", "1", "yes")
+        else:
+            include_context = bool(include_context)
 
         params = {
             "query": query,
@@ -180,6 +183,8 @@ class FileTools:
         response = await self.server.request_file_operation(resolved_vault_id, "file:read", params)
         
         # @purpose: Generate line map metadata for precise editing @depends: include_line_map flag @results: lineMap and sections in metadata
+        if isinstance(include_line_map, str):
+            include_line_map = include_line_map.lower() in ("true", "1", "yes")
         if include_line_map and response and response.get("success") and "payload" in response:
             content = response["payload"].get("content", "")
             lines = content.split('\n')

@@ -10,6 +10,7 @@ No WebSocket dependency. Vault is resolved from the CLI vault registry.
 """
 
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -91,6 +92,8 @@ class CLIFileTools:
         vault_id: Optional[str] = None,
         include_line_map: bool = False,
     ) -> Dict[str, Any]:
+        if isinstance(include_line_map, str):
+            include_line_map = include_line_map.lower() in ("true", "1", "yes")
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
@@ -113,6 +116,21 @@ class CLIFileTools:
         range_end_char: Optional[int] = None,
         **kwargs,
     ) -> Dict[str, Any]:
+        if isinstance(frontmatter_changes, str):
+            try:
+                frontmatter_changes = json.loads(frontmatter_changes)
+            except (ValueError, TypeError):
+                frontmatter_changes = None
+        if isinstance(range_start_line, str):
+            try:
+                range_start_line = int(range_start_line)
+            except (ValueError, TypeError):
+                range_start_line = None
+        if isinstance(range_end_line, str):
+            try:
+                range_end_line = int(range_end_line)
+            except (ValueError, TypeError):
+                range_end_line = None
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
