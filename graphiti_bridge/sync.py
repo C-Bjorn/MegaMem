@@ -1481,6 +1481,22 @@ def serialize_value(value, seen=None, depth=0, max_depth=3):
         return string_representation[:2000] if len(string_representation) > 2000 else string_representation
 
 
+def strip_wikilink_paths(text: str) -> str:
+    """Strip relative path prefixes from wikilinks, keeping brackets intact.
+    [[../../path/to/Name]] -> [[Name]]
+    [[../../path/to/Name|Alias]] -> [[Alias]]
+    [[Name]] -> [[Name]] (unchanged)
+    [[Name|Alias]] -> [[Alias]]
+    """
+    def replacer(m):
+        target = m.group(1)
+        alias = m.group(2)
+        if alias:
+            return f'[[{alias}]]'
+        return f'[[{target.split("/")[-1]}]]'
+    return re.sub(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]', replacer, text)
+
+
 async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
                                       reference_time: datetime, group_id: str, logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, metadata: Optional[Dict[str, Any]] = None, custom_extraction_instructions: Optional[str] = None,
                                       saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None,
@@ -1540,6 +1556,7 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
             if debug_mode:
                 logger.debug(
                     f"Frontmatter: {len(filtered_metadata)} fields attached to body (filtered from {len(metadata)})")
+        merged_body = strip_wikilink_paths(merged_body)
         episode_kwargs = {
             'name': note_name,
             'episode_body': merged_body,
@@ -1657,6 +1674,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
             if debug_mode:
                 logger.debug(
                     f"Frontmatter: {len(filtered_metadata)} fields attached to body (filtered from {len(metadata)})")
+        merged_body = strip_wikilink_paths(merged_body)
         episode_kwargs = {
             'name': note_name,
             'episode_body': merged_body,

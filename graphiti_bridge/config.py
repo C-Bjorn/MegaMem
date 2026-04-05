@@ -293,8 +293,8 @@ class BridgeConfig:
         if not self.database_url:
             errors.append("Database URL is required")
 
-        if not self.database_password and self.database_type == 'neo4j':
-            errors.append("Database password is required for Neo4j")
+        if self.database_username and not self.database_password and self.database_type == 'neo4j':
+            errors.append("Database password is required for Neo4j when username is set")
 
         # NEW DYNAMIC VALIDATION: Either models_path OR vault_path is required
         if not self.models_path and not self.vault_path:
