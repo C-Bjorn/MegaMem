@@ -85,7 +85,7 @@ MEGAMEM_INSTRUCTIONS = """\
 
 **Editing a note** → always `read_obsidian_note` first. For `full_file` overwrites AND `range_based` edits use `include_line_map: true` to get exact line numbers. Avoid `frontmatter_only` for array fields — use `full_file` instead.
 
-**Editing a `.base` file structure** → use `update_obsidian_note` with `full_file`. Use `manage_obsidian_base` for querying/listing only.
+**Editing a `.base` file structure** → use `update_obsidian_note` with `full_file`. Use `manage_obsidian_base` for querying/listing only. `.base` files are **YAML**, not JSON. Minimal valid format: `views:\n  - type: table\n    name: My View\n    order:\n      - file.name`. The `filters` key requires `and`/`or`/`not` operator keys — do NOT use an empty array `[]`.
 
 **group_ids in search** — `search_memory_facts` and `search_memory_nodes` take `group_ids` as an **array**: `["namespace"]`.
 

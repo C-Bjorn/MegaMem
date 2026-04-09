@@ -492,8 +492,23 @@ class ObsidianCLI:
             if not frontmatter_changes:
                 return self._err("frontmatter_changes required for frontmatter_only mode")
             for name, value in frontmatter_changes.items():
-                val_str = json.dumps(value) if not isinstance(value, str) else value
-                out, code = self._run(vault, "property:set", f"name={name}", f"value={val_str}", f"path={path}")
+                # bool MUST come before int — bool is a subclass of int in Python
+                if isinstance(value, bool):
+                    prop_type = "checkbox"
+                    val_str = "true" if value else "false"
+                elif isinstance(value, (int, float)):
+                    prop_type = "number"
+                    val_str = str(value)
+                elif isinstance(value, list):
+                    prop_type = "list"
+                    val_str = json.dumps(value)
+                else:
+                    prop_type = "text"
+                    val_str = str(value) if value is not None else ""
+                out, code = self._run(
+                    vault, "property:set",
+                    f"name={name}", f"value={val_str}", f"type={prop_type}", f"path={path}"
+                )
                 if self._is_error(out, code):
                     return self._err(f"property:set failed for '{name}': {out}")
             return self._ok({"path": path, "updated": list(frontmatter_changes.keys())})
@@ -783,10 +798,10 @@ class ObsidianCLI:
 
             src_folder = os.path.dirname(path)
             dst_folder = os.path.dirname(new_path)
-            src_name = os.path.splitext(os.path.basename(path))[0]
-            dst_name = os.path.splitext(os.path.basename(new_path))[0]
+            # Compare full basenames (including extension) so that renaming
+            # across extensions (e.g. .base → .md) is detected as a name change.
             folder_changed = src_folder != dst_folder
-            name_changed = src_name != dst_name
+            name_changed = os.path.basename(path) != os.path.basename(new_path)
 
             if not folder_changed and not name_changed:
                 return self._err(f"Source and destination are identical: {path}")
@@ -798,13 +813,13 @@ class ObsidianCLI:
                     return self._err(out or f"Move failed: {path} -> {dst_folder}")
                 if name_changed:
                     # Name also changed — rename at new location
-                    # Always pass name with .md — CLI uses a "has-dot" heuristic that
-                    # treats dotted stems like "Day46.01 - Foo" as already having an extension
+                    # Use os.path.basename(new_path) which already has the correct extension
+                    # from _auto_md() preprocessing (preserves .base, .canvas, etc.)
                     moved_path = f"{dst_folder}/{os.path.basename(path)}" if dst_folder else os.path.basename(path)
-                    out, code = self._run(vault, "rename", f"path={moved_path}", f"name={dst_name}.md")
+                    out, code = self._run(vault, "rename", f"path={moved_path}", f"name={os.path.basename(new_path)}")
             else:
                 # Same folder, filename-only rename
-                out, code = self._run(vault, "rename", f"path={path}", f"name={dst_name}.md")
+                out, code = self._run(vault, "rename", f"path={path}", f"name={os.path.basename(new_path)}")
 
         elif operation == "copy":
             if not new_path:
