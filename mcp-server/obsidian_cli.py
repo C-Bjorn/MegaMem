@@ -712,10 +712,18 @@ class ObsidianCLI:
         if content and created_path:
             self._content_cmd(vault, "append", created_path, content)
 
+        # Read scaffold back so caller can update in one step (no extra read call needed)
+        note_content = ""
+        if created_path:
+            read_out, read_code = self._run(vault, "read", f"path={created_path}")
+            note_content = read_out if read_code == 0 else ""
+
         return self._ok({
             "path": created_path,
             "message": f"Created from template: {template_used}",
             "templateUsed": template_used,
+            "content": note_content,
+            "instructions": "Populate ALL frontmatter fields with correct values. Replace body placeholder content matching the template structure. Do NOT add new frontmatter fields. Do NOT remove existing fields. Write back with update_obsidian_note editing_mode: full_file.",
         })
 
     def _resolve_template_folder(self, vault: str, request_type: str) -> str:

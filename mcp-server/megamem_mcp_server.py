@@ -932,7 +932,7 @@ class ObsidianMegaMemMCPServer:
 
 ROUTING: Templater folder_templates → MegaMem inbox → vault root. TPL Project→03_Projects/{{Name}}/; TPL ProjectDoc→project subfolders; entity templates→04_Entities/.
 
-WORKFLOW: 1) create 2) read_obsidian_note to see structure 3) update_obsidian_note to fill sections 4) offer remaining""",
+WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) update_obsidian_note to fill sections 3) offer remaining""",
                 inputSchema={
                     "type": "object",
                     "properties": {

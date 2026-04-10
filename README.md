@@ -46,7 +46,7 @@ Auto-sync on interval, sync on demand, or trigger from MCP. Filter by folder inc
 
 ### 📊 Sync Analytics Dashboard _(new in v1.5.5)_
 
-The unified **MegaMem panel** (brain icon, copper accent) combines Ontology, Sync, and Analytics in a single tabbed sidebar. The **Analytics tab** provides a comprehensive dashboard: animated summary cards (Synced Notes, Entities Extracted, Edges Created, Estimated Cost), a **Sync Timeline chart**, **Token Usage by Model** (Big / Small / Both Model views), a sortable **Model Performance table** with Provider column, a **Synced Notes accordion** with per-session detail (In/Out/Total tokens, duration, small model, error message), and sync health indicators. Pricing data is seeded from your Model Library and updated after every provider fetch.
+The unified **MegaMem panel** (brain icon, copper accent) combines Ontology, Sync, and Analytics in a single tabbed sidebar. The **Analytics tab** provides a comprehensive dashboard: animated summary cards (Synced Notes, Entities Extracted, Edges Created, LLM Cost + Embed sub-label), a **Sync Timeline** with Entities / Edges / LLM Cost right-axis toggle, **Token Usage by Model** (Big / Small / Both views), a sortable **Model Performance table** (Provider, Embed Cost, Total Cost), and a **Synced Notes accordion** with per-session detail including Embed Model and Embed Cost.
 
 ### ✦ MegaMem Pro _(new)_
 
@@ -247,6 +247,9 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 ### Shipped ✅
 
+- **OpenRouter Embedding Models** — Model Library → Embedding Models now fetches live catalog from `/api/v1/embeddings/models` (25 embedded seeds available without API key); Multimodal/Free/ZDR filter bar; Python bridge supports `embedder_provider: openrouter` _(v1.6.9)_
+- **Template Scaffold Return** — `create_note_with_template` returns `content` + `instructions` in response; 2-call workflow (create → update, no read needed) _(v1.6.9)_
+- **Analytics: Embed Cost + Timeline Toggles** — Embed cost tracked per sync (content_length/4 × embedder pricing); Embed Cost column + Embed Model in Synced Notes detail; Sync Timeline right-axis toggle: Entities | Edges | LLM Cost _(v1.6.9)_
 - **Unified MegaMem Panel & Sync Analytics Dashboard** — brain icon ribbon, tabbed panel (Ontology | Sync | Analytics), animated summary cards, Timeline chart, Token Usage by Model (Big/Small/Both), sortable Model Performance table with Provider column, Synced Notes accordion, Sync Health indicators, bundled model pricing _(v1.5.5)_
 - **SQLite Sync Registry** — `sync.db` replaces `sync.json`; per-note/per-DB content hashing (skip unchanged), full analytics logging (token counts, entity/edge counts, duration, model used), episode UUID chain via SQLite (no more `mm_uid` frontmatter writes) _(v1.5.5)_
 - **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
@@ -256,7 +259,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation
-- Model Library — live model fetching from 8 LLM providers; pricing synced to analytics DB for cost tracking
+- Model Library — live model fetching from LLM providers; OpenRouter now supports embedding model fetch via `/api/v1/embeddings/models`; pricing synced to analytics DB for cost tracking
 - Constrained ontology generation (edge type cap + deduplication)
 - Ontology file separation (`ontology.json` split from `data.json`)
 - Auto-update system — Python components auto-install and self-update

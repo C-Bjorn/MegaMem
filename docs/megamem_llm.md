@@ -31,6 +31,20 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - AI-enhanced query understanding
 - Contextual result ranking and relevance scoring
 
+### 🔗 OpenRouter Embedding Models _(v1.6.9)_
+
+OpenRouter is now a full embedding provider. Model Library → Embedding Models → OpenRouter lets you fetch the live catalog from `/api/v1/embeddings/models` (requires API key) and toggle models on. Static seed list of all 25 known embedding models available without a key.
+
+- **Dedicated API endpoint**: `GET /api/v1/embeddings/models` with Bearer auth
+- **Embedding-specific filter bar**: 📷 Multimodal | 🆓 Free | ZDR
+- **Python bridge**: `embedder_provider: 'openrouter'` routes through `OpenAIEmbedder(base_url="https://openrouter.ai/api/v1")` — dimensions auto-detected
+- **Per-DB embedding config**: OpenRouter available in Database Configuration → Embedding Provider dropdown
+- **Embed cost tracking**: estimated from `content_length / 4 × embedder pricing` per sync
+
+### ✅ Template Scaffold Return _(v1.6.9)_
+
+`create_note_with_template` now returns `content` (full file scaffold) and `instructions` in the response. Note creation is a 2-call workflow: **create → update** (no read needed). LLMs that skip the intermediate read call will no longer produce malformed notes.
+
 ### 🪄 Templater Company Templates _(v1.6.5)_
 
 `create_note_with_template` now discovers templates from both `templates_folder` (personal) and `company_templates_folder` (Templater fork) automatically. Company templates listed first; same-name templates deduped (company wins). Personal-only users unaffected.
@@ -47,13 +61,13 @@ A single copper-accented brain icon opens a tabbed side-panel with three section
 
 Built on the local SQLite `sync.db`, the Analytics tab delivers full visibility into your sync operations:
 
-- **Summary cards**: Synced Notes, Entities Extracted, Edges Created, Estimated Cost (animated, always shows real data)
-- **Sync Timeline**: Line/area chart — day or hour granularity, toggleable Entities series overlay
+- **Summary cards**: Synced Notes, Entities Extracted, Edges Created, LLM Cost (animated). LLM Cost shows an "Embed: $x" sub-label when embedding cost is tracked.
+- **Sync Timeline**: Line/area chart — day or hour granularity. Right-axis toggle: **Entities | Edges | LLM Cost** (purple/green dashed overlays).
 - **Token Usage by Model**: Stacked bar chart with Big Model / Small Model / Both toggle
-- **Model Performance table**: Sortable by any column — includes Provider, Avg Duration, Avg In/Out Tokens, Avg Entities, Avg Edges, Total Cost
-- **Synced Notes accordion**: All sync sessions in the current filter range; expand each row for full detail (InTokens, OutTokens, TotalTokens, Duration, Small Model, error message)
+- **Model Performance table**: Sortable by any column — includes Provider, Avg Duration, Avg In/Out Tokens, Avg Entities, Avg Edges, **Embed Cost**, Total Cost
+- **Synced Notes accordion**: Expand each row for full detail: InTokens, OutTokens, TotalTokens, Duration, Small Model, **Embed Model**, **Embed Cost**, error message
 - **Sync Health**: Recent failures with error messages, stale notes count, duration trend
-- **Cost estimates**: Model Library pricing synced to `model_pricing` on every fetch + on plugin startup; supports all major providers
+- **Cost estimates**: LLM cost from `model_pricing` × token usage. Embed cost estimated from `content_length / 4` × embedder pricing (Option B). Exact embed tokens via API coming in a future patch (Option A).
 
 ### Multi-Database Support
 

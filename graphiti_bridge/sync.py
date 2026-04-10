@@ -553,10 +553,19 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         )
         embedder = OpenAIEmbedder(config=embedder_config)
 
+    elif config.embedder_provider == "openrouter":
+        # OpenRouter Embedder — OpenAI-compatible endpoint with custom base_url
+        embedder_config = OpenAIEmbedderConfig(
+            api_key=embedder_api_key,
+            embedding_model=config.embedding_model,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        embedder = OpenAIEmbedder(config=embedder_config)
+
     else:
         # Unsupported embedder provider
         raise NotImplementedError(
-            f"Embedder provider '{config.embedder_provider}' is not supported. Supported: openai, google, voyage, azure, ollama")
+            f"Embedder provider '{config.embedder_provider}' is not supported. Supported: openai, google, voyage, azure, ollama, openrouter")
 
     # ---- Diagnostics (debug-only) ----
     if debug:
@@ -1275,7 +1284,8 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
             clean_graphiti_data = {
                 'episode_uuid': episode_uuid,
                 'entities_count': entities_count,
-                'relationships_count': relationships_count
+                'relationships_count': relationships_count,
+                'embed_tokens_est': len(clean_text) // 4,
             }
 
             # Graphiti result structure logging removed (not useful in production)
