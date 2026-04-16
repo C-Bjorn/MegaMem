@@ -902,8 +902,15 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                     if debug:
                         logger.info(f"Appended preset to small model: {processed_small_model}")
             
-            # OpenRouter uses an OpenAI-compatible API surface; use OpenAIGenericClient with OpenRouter base URL
-            openrouter_base = "https://openrouter.ai/api/v1"
+            # OpenRouter uses an OpenAI-compatible API surface; use OpenAIGenericClient with OpenRouter base URL.
+            # Resolution order: explicit config field -> environment variable -> public OpenRouter default.
+            # This allows routing through OpenAI-compatible gateways (LiteLLM, self-hosted proxies) while
+            # defaulting to public OpenRouter for users who haven't configured an override.
+            openrouter_base = (
+                getattr(config, 'openrouter_base_url', None)
+                or os.environ.get("OPENROUTER_BASE_URL")
+                or "https://openrouter.ai/api/v1"
+            )
             llm_config = LLMConfig(
                 api_key=llm_api_key,
                 model=processed_model,
