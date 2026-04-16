@@ -998,7 +998,7 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             ),
             Tool(
                 name="sync_obsidian_note",
-                description="Sync a specific note to MegaMem/Graphiti knowledge graph by path. Opens the note and triggers the registered sync command. Use after updating a note to queue it for sync. Requires Obsidian to be running with MegaMem plugin active. Sync completes asynchronously after this tool returns.",
+                description="Sync a specific note to the graph by path. Opens the note and triggers the registered sync command. Use only on-demand when user requests sync after updating a note. Sync completes asynchronously after this tool returns.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1852,11 +1852,20 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             try:
                 hc_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
                 hc_config.limit = 1
-                await self.megamem_client._search(
-                    query="health",
-                    config=hc_config,
-                    group_ids=[bridge_config.default_namespace]
-                )
+                # Suppress graphiti-core's internal "Error executing" stderr spam during this probe —
+                # we handle the exception ourselves below
+                import logging as _logging
+                _gcore_logger = _logging.getLogger("graphiti_core")
+                _prev_level = _gcore_logger.level
+                _gcore_logger.setLevel(_logging.CRITICAL)
+                try:
+                    await self.megamem_client._search(
+                        query="health",
+                        config=hc_config,
+                        group_ids=[bridge_config.default_namespace]
+                    )
+                finally:
+                    _gcore_logger.setLevel(_prev_level)
                 logger.info("[BACKGROUND] Embedder health check passed")
             except Exception as embed_err:
                 err_str = str(embed_err)
@@ -2406,11 +2415,20 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
         database_configs = obsidian_config.get("databaseConfigs", {})
         current_db_config = database_configs.get(database_type, {})
 
+        # Fallback: find the primary database entry from the new `databases` array
+        # (UI writes credentials here; databaseConfigs may be stale/empty)
+        _primary_db = next(
+            (db for db in obsidian_config.get("databases", [])
+             if db.get("type") == database_type
+             and db.get("category") != "child-vault"
+             and db.get("enabled", True)),
+            {}
+        )
+
         # Resolve database URL from plugin settings
         database_url = self._get_database_url_from_obsidian_config(
             obsidian_config, database_type, current_db_config)
 
-        # Inside _create_bridge_config, before the return statement:
         resolved_namespace = self.vault_resolver.get_active_namespace(
             obsidian_config)
 
@@ -2423,11 +2441,9 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
                 "embeddingModel", "text-embedding-3-small"),
             database_type=database_type,
             database_url=database_url,
-            database_username=current_db_config.get(
-                "username") or obsidian_config.get("databaseUsername"),
-            database_password=current_db_config.get(
-                "password") or obsidian_config.get("databasePassword"),
-            database_name=obsidian_config.get("databaseName", "neo4j"),
+            database_username=current_db_config.get("username") or _primary_db.get("username") or obsidian_config.get("databaseUsername"),
+            database_password=current_db_config.get("password") or _primary_db.get("password") or obsidian_config.get("databasePassword"),
+            database_name=current_db_config.get("database") or _primary_db.get("database") or obsidian_config.get("databaseName", "neo4j"),
             default_namespace=resolved_namespace,
             use_custom_ontology=obsidian_config.get(
                 "useCustomOntology", False),
