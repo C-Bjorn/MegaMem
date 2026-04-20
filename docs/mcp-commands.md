@@ -4,7 +4,7 @@ date_updated: 2026-04-01T00:00
 ---
 # MCP Commands Reference
 
-This document lists all 21 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 10 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 22 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 11 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -178,14 +178,19 @@ Search for notes in Obsidian vault by filename and/or content (aliases: mv, my v
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `query` | `string` | Search query (required) | Yes | |
-| `search_mode` | `string` | Search mode: filename, content, or both | No | `both` |
+| `query` | `string` | Search query. Required for filename/content search. Optional when `property_filter` is set — acts as a case-insensitive filename/path substring filter. | No | |
+| `search_mode` | `string` | Search mode: filename, content, or both. Ignored when `property_filter` is set. | No | `both` |
 | `max_results` | `integer` | Maximum number of results to return | No | `100` |
 | `include_context` | `boolean` | Whether to include context snippets for content matches | No | `True` |
 | `path` | `string` | Scopes results to this folder path — only notes within this path are returned | No | |
+| `property_filter` | `object` | Filter by frontmatter properties. All key/value pairs must match (AND logic). Array frontmatter values are checked with `includes()`. Example: `{"status": "active", "type": "task"}`. Uses Obsidian eval — requires Obsidian running. | No | |
+| `mtime_after` | `string` | Return only notes modified after this date (ISO format, e.g. `2026-03-20`). Compares against `file.mtime`. Uses Obsidian eval — requires Obsidian running. | No | |
+| `mtime_before` | `string` | Return only notes modified before this date (ISO format, e.g. `2026-04-01`). Compares against `file.mtime`. Uses Obsidian eval — requires Obsidian running. | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
 
 **Filename search behavior (`search_mode=filename`):** Splits query into words; a file matches if **all words** appear anywhere in the basename or full path (order-independent, case-insensitive). Handles multi-word queries, dotted note names (e.g. `Day45.01`), and missing punctuation gracefully. Results return `matchType: "filename"`.
+
+**Property/mtime filter behavior:** When `property_filter`, `mtime_after`, or `mtime_before` is set, dispatches to an eval-based JS search (`_search_by_property`) bypassing `search:context`. Notes without frontmatter still match when only mtime filters are used. `property_filter` and `mtime_*` params can be combined freely. Returns `matchType: "property"`.
 
 ### `read_obsidian_note`
 
@@ -344,25 +349,42 @@ Delete, rename/move, or copy notes in Obsidian vault (aliases: mv, my vault, obs
 - `delete` — move to trash
 - `copy` — duplicate note to `newPath` using `vault.copy()`. Does NOT update wikilinks (source links unchanged).
 
+### `sync_obsidian_note`
+
+Sync a specific note to the MegaMem/Graphiti knowledge graph by path. Opens the note and triggers the registered sync command. Use after updating a note to queue it for graph sync. Requires Obsidian running with MegaMem plugin active. Sync completes asynchronously after this tool returns. (aliases: mv, my vault, obsidian)
+
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `path` | `string` | Vault-relative path to the note (e.g. `'My Notes/SomeNote.md'`). Do NOT use absolute system paths or prefix with the vault folder name. | Yes | |
+| `vault_id` | `string` | Vault ID (optional) | No | |
+
+---
+
 ### `manage_obsidian_base`
 
-Manage Obsidian Bases `.base` files — list all bases, inspect views, run queries, or create new base files (aliases: mv, my vault, obsidian)
+Manage Obsidian Bases `.base` files — list all bases, inspect views, run queries, or create items (aliases: mv, my vault, obsidian, bases)
 
 **Parameters:**
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
 | `operation` | `string` | Operation to perform: `list`, `views`, `query`, `create` | Yes | |
-| `path` | `string` | Path to the `.base` file (required for `views`, `query`, and `create`) | No | |
-| `query` | `string` | Query expression to run against the base (used for `query` operation) | No | |
-| `content` | `string` | Base file content (used for `create` operation) | No | |
+| `file` | `string` | Base filename (without extension). Used by: `views`, `query`, `create`. | No | |
+| `path` | `string` | Full vault-relative path to the `.base` file (alternative to `file`). Used by: `views`, `query`, `create`. | No | |
+| `view` | `string` | View name within the base. Used by: `query` (optional), `create` (optional). | No | |
+| `format` | `string` | Output format for query results: `json` (default), `csv`, `tsv`, `md`, `paths`. Used by: `query`. | No | `json` |
+| `limit` | `integer` | Max number of results to return. Applied post-fetch to the parsed JSON array. Used by: `query`. | No | |
+| `name` | `string` | Name/title for the new item. Used by: `create`. | No | |
+| `content` | `string` | Initial content for the new item. Used by: `create`. | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
 
 **Operations:**
 - `list` — list all `.base` files in the vault
 - `views` — return the named views defined in a `.base` file
-- `query` — execute a query against a `.base` file's data
-- `create` — create a new `.base` file at the specified path with the given content
+- `query` — execute a query against a `.base` file's data and return results
+- `create` — create a new item/row in an existing `.base` file
 
 ---
 

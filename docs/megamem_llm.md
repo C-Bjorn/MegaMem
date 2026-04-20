@@ -987,14 +987,17 @@ Search for notes in Obsidian vault by filename and/or content (aliases: mv, my v
 
 **Parameters:**
 
-| Name              | Type      | Description                                             | Required | Default |
-| ----------------- | --------- | ------------------------------------------------------- | -------- | ------- |
-| `query`           | `string`  | Search query (required)                                 | Yes      |         |
-| `search_mode`     | `string`  | Search mode: filename, content, or both                 | No       | `both`  |
-| `max_results`     | `integer` | Maximum number of results to return                     | No       | `100`   |
-| `include_context` | `boolean` | Whether to include context snippets for content matches | No       | `True`  |
-| `path`            | `string`  | Path to search within the vault (optional)              | No       |         |
-| `vault_id`        | `string`  | Vault ID (optional)                                     | No       |         |
+| Name              | Type      | Description                                                                                                                                                                                              | Required | Default |
+| ----------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `query`           | `string`  | Search query. Required for filename/content search. Optional when `property_filter` is set (if provided, acts as a case-insensitive filename/path substring filter).                                     | No       |         |
+| `search_mode`     | `string`  | Search mode: filename, content, or both. Ignored when `property_filter` is set.                                                                                                                          | No       | `both`  |
+| `max_results`     | `integer` | Maximum number of results to return                                                                                                                                                                      | No       | `100`   |
+| `include_context` | `boolean` | Include context snippets for content matches                                                                                                                                                             | No       | `True`  |
+| `path`            | `string`  | Path to search within the vault (optional)                                                                                                                                                               | No       |         |
+| `property_filter` | `object`  | Filter by frontmatter properties. Pass a JSON object of key/value pairs — all must match (AND logic). Array frontmatter values are checked with `includes()`. Example: `{"status": "active", "type": "task"}`. Uses Obsidian eval — requires Obsidian running. Can be combined with `mtime_after`/`mtime_before`. | No       |         |
+| `mtime_after`     | `string`  | Return only notes modified after this date (ISO format, e.g. `2026-03-20`). Compares against `file.mtime`. Uses Obsidian eval — requires Obsidian running. Can be combined with `property_filter`.       | No       |         |
+| `mtime_before`    | `string`  | Return only notes modified before this date (ISO format, e.g. `2026-04-01`). Compares against `file.mtime`. Uses Obsidian eval — requires Obsidian running. Can be combined with `property_filter`.      | No       |         |
+| `vault_id`        | `string`  | Vault ID (optional)                                                                                                                                                                                      | No       |         |
 
 ### `read_obsidian_note`
 
@@ -1149,16 +1152,17 @@ Manage Obsidian Bases `.base` files — list all bases, inspect views, run queri
 
 **Parameters:**
 
-| Name        | Type     | Description                                                                    | Required | Default |
-| ----------- | -------- | ------------------------------------------------------------------------------ | -------- | ------- |
-| `operation` | `string` | Operation to perform. `list`: list all `.base` files (no other params needed). `views`: list views in a base (requires `file` or `path`). `query`: query base data and return results (requires `file` or `path`; use `format` to control output). `create`: create a new item/row in a base (requires `file` or `path`). | Yes      |         |
-| `file`      | `string` | Base filename (without extension). Used by: `views`, `query`, `create`.                                                                                                                                                                                                                                                  | No       |         |
-| `path`      | `string` | Full vault-relative path to the `.base` file (alternative to `file`). Used by: `views`, `query`, `create`.                                                                                                                                                                                                               | No       |         |
-| `view`      | `string` | View name within the base. Used by: `query` (optional), `create` (optional).                                                                                                                                                                                                                                             | No       |         |
-| `format`    | `string` | Output format for query results: `json` (default, returns parsed structured data), `csv`, `tsv`, `md`, `paths`. Used by: `query`.                                                                                                                                                                                        | No       | `json`  |
-| `name`      | `string` | Name/title for the new item. Used by: `create`.                                                                                                                                                                                                                                                                          | No       |         |
-| `content`   | `string` | Initial content for the new item. Used by: `create`.                                                                                                                                                                                                                                                                     | No       |         |
-| `vault_id`  | `string` | Vault ID (optional)                                                                                                                                                                                                                                                                                                      | No       |         |
+| Name        | Type      | Description                                                                    | Required | Default |
+| ----------- | --------- | ------------------------------------------------------------------------------ | -------- | ------- |
+| `operation` | `string`  | Operation to perform. `list`: list all `.base` files (no other params needed). `views`: list views in a base (requires `file` or `path`). `query`: query base data and return results (requires `file` or `path`; use `format` to control output). `create`: create a new item/row in a base (requires `file` or `path`). | Yes      |         |
+| `file`      | `string`  | Base filename (without extension). Used by: `views`, `query`, `create`.        | No       |         |
+| `path`      | `string`  | Full vault-relative path to the `.base` file (alternative to `file`). Used by: `views`, `query`, `create`. | No       |         |
+| `view`      | `string`  | View name within the base. Used by: `query` (optional), `create` (optional).   | No       |         |
+| `format`    | `string`  | Output format for query results. `json` (default) returns parsed structured data. Used by: `query`. | No       | `json`  |
+| `limit`     | `integer` | Max number of results to return. Applied post-fetch to the parsed JSON array. Used by: `query`. | No       |         |
+| `name`      | `string`  | Name/title for the new item. Used by: `create`.                                | No       |         |
+| `content`   | `string`  | Initial content for the new item. Used by: `create`.                           | No       |         |
+| `vault_id`  | `string`  | Vault ID (optional)                                                             | No       |         |
 
 **Operations:**
 - `list` — list all `.base` files in the vault

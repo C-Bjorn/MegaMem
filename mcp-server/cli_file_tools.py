@@ -71,12 +71,15 @@ class CLIFileTools:
 
     async def search_obsidian_notes(
         self,
-        query: str,
+        query: str = "",
         vault_id: Optional[str] = None,
         search_mode: str = "both",
         max_results: int = 100,
         include_context: bool = True,
         path: Optional[str] = None,
+        property_filter: Optional[dict] = None,
+        mtime_after: Optional[str] = None,
+        mtime_before: Optional[str] = None,
     ) -> Dict[str, Any]:
         vault, err = self._resolve_vault(vault_id)
         if err:
@@ -84,6 +87,7 @@ class CLIFileTools:
         return await asyncio.to_thread(
             self.cli.search_obsidian_notes,
             vault, query, search_mode, max_results, include_context, path,
+            property_filter, mtime_after, mtime_before,
         )
 
     async def read_obsidian_note(
@@ -292,6 +296,7 @@ class CLIFileTools:
         name: Optional[str] = None,
         content: Optional[str] = None,
         vault_id: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Route Bases operations by operation param to the underlying method.
         operation: 'list' | 'views' | 'query' | 'create'
@@ -301,7 +306,7 @@ class CLIFileTools:
         elif operation == "views":
             return await self.list_base_views(file=file, path=path, vault_id=vault_id)
         elif operation == "query":
-            return await self.query_base(file=file, path=path, view=view, format=format, vault_id=vault_id)
+            return await self.query_base(file=file, path=path, view=view, format=format, vault_id=vault_id, limit=limit)
         elif operation == "create":
             return await self.create_base_item(file=file, path=path, view=view, name=name, content=content, vault_id=vault_id)
         else:
@@ -335,11 +340,12 @@ class CLIFileTools:
         view: Optional[str] = None,
         format: str = "json",
         vault_id: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
-        return await asyncio.to_thread(self.cli.query_base, vault, file, path, view, format)
+        return await asyncio.to_thread(self.cli.query_base, vault, file, path, view, format, limit)
 
     async def create_base_item(
         self,

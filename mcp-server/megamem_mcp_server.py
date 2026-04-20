@@ -232,11 +232,14 @@ No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as 
 ### `search_obsidian_notes`
 | Param | Required | Notes |
 |---|---|---|
-| `query` | Yes | |
-| `search_mode` | No | `filename` / `content` / `both` (default) |
+| `query` | No | Required for filename/content search. Optional when `property_filter` is set — acts as filename/path substring filter. |
+| `search_mode` | No | `filename` / `content` / `both` (default). Ignored when `property_filter` is set. |
 | `max_results` | No | Default 100 |
 | `include_context` | No | Default true |
 | `path` | No | Scope to folder |
+| `property_filter` | No | Frontmatter key/value filter (AND logic, array fields use includes()). Uses Obsidian eval. e.g. `{"status":"active","type":"task"}` |
+| `mtime_after` | No | ISO date e.g. `2026-03-20` — notes modified after this date. Uses Obsidian eval. |
+| `mtime_before` | No | ISO date — notes modified before this date. Uses Obsidian eval. |
 | `vault_id` | No | |
 
 ### `sync_obsidian_note`
@@ -275,6 +278,7 @@ Note: `clone` deep-copies the entire folder tree using `vault.copy()`. Returns `
 | `path` | views/query/create | Full vault-relative path (alternative to `file`) |
 | `view` | No | View name — used by `query` and `create` |
 | `format` | No | query output: `json` (default), `csv`, `tsv`, `md`, `paths` |
+| `limit` | No | query only: max rows to return, applied post-fetch |
 | `name` | No | create: item name |
 | `content` | No | create: initial content |
 | `vault_id` | No | |
@@ -776,12 +780,12 @@ class ObsidianMegaMemMCPServer:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query (required)"},
+                        "query": {"type": "string", "description": "Search query. Required for filename/content search. Optional when property_filter is set (if provided, acts as a case-insensitive filename/path substring filter)."},
                         "search_mode": {
                             "type": "string",
                             "enum": ["filename", "content", "both"],
                             "default": "both",
-                            "description": "Search mode: filename, content, or both"
+                            "description": "Search mode: filename, content, or both. Ignored when property_filter is set."
                         },
                         "max_results": {
                             "anyOf": [{"type": "integer"}, {"type": "string"}],
@@ -794,9 +798,21 @@ class ObsidianMegaMemMCPServer:
                             "description": "Include context snippets for content matches"
                         },
                         "path": {"type": "string", "description": "Path to search within the vault (optional)"},
+                        "property_filter": {
+                            "type": "object",
+                            "description": "Filter by frontmatter properties. Pass a JSON object of key/value pairs — all must match (AND logic). Array frontmatter values are checked with includes(). Example: {\"status\": \"active\", \"type\": \"task\"}. Uses Obsidian eval — requires Obsidian running."
+                        },
+                        "mtime_after": {
+                            "type": "string",
+                            "description": "Return only notes modified after this date (ISO format, e.g. '2026-03-20'). Compares against file.mtime. Uses Obsidian eval — requires Obsidian running. Can be combined with property_filter."
+                        },
+                        "mtime_before": {
+                            "type": "string",
+                            "description": "Return only notes modified before this date (ISO format, e.g. '2026-04-01'). Compares against file.mtime. Uses Obsidian eval — requires Obsidian running. Can be combined with property_filter."
+                        },
                         "vault_id": {"type": "string", "description": "Vault ID (optional)"}
                     },
-                    "required": ["query"]
+                    "required": []
                 }
             ),
             Tool(
@@ -1036,6 +1052,10 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
                             "enum": ["json", "csv", "tsv", "md", "paths"],
                             "default": "json",
                             "description": "Output format for query results. json (default) returns parsed structured data. Used by: query."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max number of results to return. Applied post-fetch to the parsed JSON array. Used by: query."
                         },
                         "name": {
                             "type": "string",
@@ -1694,9 +1714,9 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             # Coerce string-serialized args to correct native types.
             # Some Agent SDK frameworks stringify all non-string params before sending.
             _COERCE_INT  = {"range_start_line", "range_start_char", "range_end_line",
-                            "range_end_char", "max_results", "max_depth"}
+                            "range_end_char", "max_results", "max_depth", "limit"}
             _COERCE_BOOL = {"include_line_map", "include_context", "include_files"}
-            _COERCE_JSON = {"frontmatter_changes"}
+            _COERCE_JSON = {"frontmatter_changes", "property_filter"}
             for _k in list(normalized_args.keys()):
                 _v = normalized_args[_k]
                 if not isinstance(_v, str):

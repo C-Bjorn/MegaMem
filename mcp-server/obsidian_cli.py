@@ -279,16 +279,28 @@ class ObsidianCLI:
     def search_obsidian_notes(
         self,
         vault: str,
-        query: str,
+        query: str = "",
         search_mode: str = "both",
         max_results: int = 100,
         include_context: bool = True,
         path: Optional[str] = None,
+        property_filter: Optional[dict] = None,
+        mtime_after: Optional[str] = None,
+        mtime_before: Optional[str] = None,
     ) -> dict:
         """
         Search vault notes. search_mode=filename uses 'obsidian files' + client-side filter.
         search_mode=content|both uses search:context with full-text matching.
+        property_filter: dict of frontmatter key/value pairs — uses eval to filter vault.
+        mtime_after / mtime_before: ISO date strings (e.g. "2026-03-20") for mtime range filtering.
+          Both use eval. If combined with a non-empty query, applies query as a filename/path filter.
         """
+        if property_filter or mtime_after or mtime_before:
+            return self._search_by_property(
+                vault, property_filter or {}, query=query, max_results=max_results,
+                mtime_after=mtime_after, mtime_before=mtime_before,
+            )
+
         if search_mode == "filename":
             return self._search_by_filename(vault, query, max_results, path)
 
@@ -377,6 +389,80 @@ class ObsidianCLI:
             "totalResults": len(results),
             "query": query,
             "searchMode": "filename",
+        })
+
+    def _search_by_property(
+        self,
+        vault: str,
+        property_filter: dict,
+        query: str = "",
+        max_results: int = 100,
+        mtime_after: Optional[str] = None,
+        mtime_before: Optional[str] = None,
+    ) -> dict:
+        """Filter vault notes by frontmatter properties and/or mtime range via eval.
+        property_filter: all key/value pairs must match (AND logic); empty dict = no frontmatter filter.
+        Array frontmatter values are checked with includes(); scalars use String() equality.
+        mtime_after / mtime_before: ISO date strings; maps to f.stat.mtime (Unix ms).
+        query: case-insensitive filename/path substring filter (not full-text).
+        """
+        filter_json = json.dumps(property_filter)
+        query_lower = query.lower().strip()
+        query_js = json.dumps(query_lower) if query_lower else '""'
+        mtime_after_js = json.dumps(mtime_after) if mtime_after else "null"
+        mtime_before_js = json.dumps(mtime_before) if mtime_before else "null"
+        limit_n = int(max_results)
+        js = (
+            "(()=>{"
+            f"const filter={filter_json};"
+            f"const q={query_js};"
+            f"const mtimeAfter={mtime_after_js}?new Date({mtime_after_js}).getTime():0;"
+            f"const mtimeBefore={mtime_before_js}?new Date({mtime_before_js}).getTime():Infinity;"
+            "const hasFmFilter=Object.keys(filter).length>0;"
+            "const results=[];"
+            "for(const f of app.vault.getMarkdownFiles()){"
+            " if(q&&!f.path.toLowerCase().includes(q)&&!f.basename.toLowerCase().includes(q))continue;"
+            " if(f.stat.mtime<mtimeAfter||f.stat.mtime>mtimeBefore)continue;"
+            " if(hasFmFilter){"
+            "  const fm=app.metadataCache.getFileCache(f)?.frontmatter;"
+            "  if(!fm)continue;"
+            "  let ok=true;"
+            "  for(const [k,v] of Object.entries(filter)){"
+            "   const fv=fm[k];"
+            "   if(Array.isArray(fv)){if(!fv.map(String).includes(String(v))){ok=false;break;}}"
+            "   else{if(String(fv??'')!==String(v)){ok=false;break;}}"
+            "  }"
+            "  if(!ok)continue;"
+            " }"
+            " results.push({"
+            "  path:f.path,"
+            "  name:f.extension?f.basename+'.'+f.extension:f.basename,"
+            "  basename:f.basename,extension:f.extension,"
+            "  mtime:f.stat.mtime,ctime:f.stat.ctime,matchType:'property'"
+            " });"
+            "}"
+            f"return JSON.stringify(results.slice(0,{limit_n}));"
+            "})()"
+        )
+        out, code = self._run(vault, "eval", f"code={js}")
+        if self._is_error(out, code):
+            return self._err(out or "Property search failed")
+        # Obsidian CLI prefixes eval output with "=> " — strip before JSON parse
+        json_str = out.strip()
+        if json_str.startswith("=>"):
+            json_str = json_str[2:].strip()
+        try:
+            parsed: list = json.loads(json_str) if json_str else []
+        except json.JSONDecodeError:
+            return self._err(f"Property search returned invalid JSON: {out[:200]}")
+        return self._ok({
+            "results": parsed,
+            "totalResults": len(parsed),
+            "query": query or None,
+            "propertyFilter": property_filter or None,
+            "mtimeAfter": mtime_after,
+            "mtimeBefore": mtime_before,
+            "searchMode": "property",
         })
 
     # ─── Tool 2: read_obsidian_note ──────────────────────────────────────────
@@ -994,11 +1080,13 @@ class ObsidianCLI:
         path: Optional[str] = None,
         view: Optional[str] = None,
         format: str = "json",
+        limit: Optional[int] = None,
     ) -> dict:
         """Query a base and return structured results.
         CLI: obsidian base:query file=<name> view=<view> format=<format>
         When format=json, the stdout is parsed into a Python object before returning.
         Supported formats: json, csv, tsv, md, paths
+        limit: if set, slices the result list to the first N items (json format only).
         """
         args = ["base:query"]
         if file:
@@ -1016,6 +1104,8 @@ class ObsidianCLI:
         if format == "json":
             try:
                 parsed = json.loads(out) if out else []
+                if limit:
+                    parsed = parsed[:limit]
                 return self._ok({"results": parsed, "format": format})
             except json.JSONDecodeError:
                 # Return raw string if JSON parse fails — CLI may not have returned valid JSON

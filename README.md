@@ -66,7 +66,7 @@ MegaMem is **stable in daily production use** and currently in public beta. We'r
 
 ## 🛠️ MCP Tools Reference
 
-All 21 tools are available to Claude Desktop and any MCP-compatible client.
+All 22 tools are available to Claude Desktop and any MCP-compatible client.
 
 ### Graph Operations (11)
 
@@ -255,7 +255,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 - **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
 - **Multi-vault architecture** — masterVault control panel, childVault registration, MCP `database_id` routing, `list_databases` tool _(v1.5)_
 - Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
-- 21 MCP tools — 11 graph operations + 10 Obsidian file tools (including `manage_obsidian_base` for `.base` files)
+- 22 MCP tools — 11 graph operations + 11 Obsidian file tools (including `manage_obsidian_base` for `.base` files)
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation

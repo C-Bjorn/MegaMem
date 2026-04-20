@@ -224,13 +224,23 @@ class OpenRouterClient(LLMClient):
                     pass
 
             result = response.choices[0].message.content or ''
-            
+
             # Check if response is HTML (Cloudflare/infrastructure error)
             if result.strip().startswith(('<!DOCTYPE html>', '<html')):
                 error_msg = _parse_html_error(result)
                 logger.error(error_msg)
                 raise InfrastructureError(error_msg)
-            
+
+            # Strip markdown code fences if present. Claude (and some other
+            # models) wrap JSON output in ```json ... ``` when the downstream
+            # provider doesn't enforce response_format=json_schema natively
+            # (e.g. Anthropic via OpenAI-compat shims, some local gateways).
+            stripped = result.strip()
+            if stripped.startswith('```'):
+                stripped = re.sub(r'^```(?:json|JSON)?\s*\n?', '', stripped)
+                stripped = re.sub(r'\n?\s*```\s*$', '', stripped)
+                result = stripped.strip()
+
             return json.loads(result)
 
         except openai.RateLimitError as e:
