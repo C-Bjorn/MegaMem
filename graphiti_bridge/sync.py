@@ -1507,6 +1507,45 @@ def strip_wikilink_paths(text: str) -> str:
     return re.sub(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]', replacer, text)
 
 
+async def _set_episode_source_file(graphiti, episode_uuid, source_file, logger,
+                                    retries=3, base_delay=1.0):
+    """Phase-2 SET of source_file on :Episodic node.
+
+    Graphiti's add_episode() has no kwarg for custom properties and
+    EpisodicNode's pydantic schema is fixed, so source_file is written in a
+    second Cypher statement against the episode UUID.
+
+    Mirrors memory-loop's add_episode_safe (lib/graphiti_wrapper.py). BI's
+    heartbeat arm-3 reads this property via equality (ep.source_file = ref.stem)
+    for cross-writer orphan detection.
+    """
+    for attempt in range(retries):
+        try:
+            await graphiti.driver.execute_query(
+                "MATCH (e:Episodic {uuid: $uuid}) SET e.source_file = $source_file",
+                uuid=episode_uuid,
+                source_file=source_file,
+            )
+            return
+        except Exception as e:
+            if attempt < retries - 1:
+                delay = base_delay * (2 ** attempt)
+                if hasattr(logger, 'warning'):
+                    logger.warning(
+                        "source_file SET failed (attempt %d/%d) for UUID=%s: %s — retrying in %.1fs",
+                        attempt + 1, retries, episode_uuid, str(e)[:200], delay,
+                    )
+                await asyncio.sleep(delay)
+            else:
+                if hasattr(logger, 'error'):
+                    logger.error(
+                        "source_file SET failed after %d attempts for UUID=%s file=%s: %s — "
+                        "node persisted without source_file; manual backfill required",
+                        retries, episode_uuid, source_file, str(e)[:300],
+                    )
+                raise
+
+
 async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
                                       reference_time: datetime, group_id: str, logger, database_type: str = 'neo4j', config=None, debug_mode: bool = False, metadata: Optional[Dict[str, Any]] = None, custom_extraction_instructions: Optional[str] = None,
                                       saga_name: Optional[str] = None, saga_previous_uuid: Optional[str] = None,
@@ -1598,6 +1637,12 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
 
         # Create episode with database-specific parameters
         result = await graphiti.add_episode(**episode_kwargs)
+
+        # Phase-2 SET of source_file for BI heartbeat arm-3 (cross-writer canonical).
+        # See _set_episode_source_file docstring.
+        episode_uuid = getattr(getattr(result, 'episode', None), 'uuid', None)
+        if episode_uuid:
+            await _set_episode_source_file(graphiti, episode_uuid, note_name, logger)
 
         # Force transaction commit if available
         if hasattr(graphiti, '_driver') and graphiti._driver:
@@ -1720,6 +1765,12 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
 
         # Create custom entity episode using Graphiti Custom Entities API
         result = await graphiti.add_episode(**episode_kwargs)
+
+        # Phase-2 SET of source_file for BI heartbeat arm-3 (cross-writer canonical).
+        # See _set_episode_source_file docstring.
+        episode_uuid = getattr(getattr(result, 'episode', None), 'uuid', None)
+        if episode_uuid:
+            await _set_episode_source_file(graphiti, episode_uuid, note_name, logger)
 
         return result
 
