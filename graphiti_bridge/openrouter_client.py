@@ -6,6 +6,8 @@ import json
 import logging
 import re
 import typing
+
+import httpx
 from typing import ClassVar
 
 import openai
@@ -83,7 +85,8 @@ class OpenRouterClient(LLMClient):
         if client is None:
             self.client = AsyncOpenAI(
                 api_key=config.api_key,
-                base_url=config.base_url or "https://openrouter.ai/api/v1"
+                base_url=config.base_url or "https://openrouter.ai/api/v1",
+                timeout=httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
             )
         else:
             self.client = client
@@ -244,7 +247,7 @@ class OpenRouterClient(LLMClient):
             return json.loads(result)
 
         except openai.RateLimitError as e:
-            raise RateLimitError from e
+            raise RateLimitError(str(e)) from e
         except json.JSONDecodeError as e:
             # Check if JSON decode error is due to HTML content
             content = getattr(e, 'doc', '') or str(e)

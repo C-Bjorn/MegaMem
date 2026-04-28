@@ -122,6 +122,7 @@ Four animated cards show totals for the current filter:
 | **Estimated Cost** | `SUM(estimated_cost)` from `sync_analytics` × `model_pricing` rates |
 
 > **Cost accuracy:** Pricing data is seeded from your Model Library (Settings → Model Library → Fetch). Fetching populates `model_pricing` with real provider prices. Bundled defaults cover common OpenAI, Anthropic, and Google models.
+> **OpenRouter users:** Cost display requires the `provider` field in `model_pricing` to match the vendor prefix (e.g. `google`, not `openrouter`). As of v1.6.13, this is normalized automatically on every plugin load — no manual SQL update needed.
 
 ### Sync Timeline
 

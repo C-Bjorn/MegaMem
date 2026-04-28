@@ -1361,6 +1361,11 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
         note_end_time = datetime.now()
         processing_duration = (note_end_time - note_start_time).total_seconds()
 
+        if debug_mode:
+            logger.error(f"[SYNC-DEBUG] Exception type: {type(e).__name__}, repr: {repr(e)}")
+            if hasattr(e, '__cause__') and e.__cause__ is not None:
+                logger.error(f"[SYNC-DEBUG] Caused by: {type(e.__cause__).__name__}: {repr(e.__cause__)}")
+
         # Enhanced rate limiting detection with reset time parsing
         error_message = str(e).lower()
         original_error = str(e)  # Keep original case for parsing
