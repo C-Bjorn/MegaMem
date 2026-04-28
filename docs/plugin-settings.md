@@ -321,6 +321,17 @@ Settings in this accordion (in order):
 ### Episode Contributor <i data-lucide="check-circle"></i>
 - Description: Your name or ID — injected as `mm_contributor` in every episode created by this vault. Useful in shared team databases to track who contributed each piece of knowledge. Applied to Obsidian note syncs, `add_memory`, and `add_conversation_memory`. Leave blank to omit the field.
 
+### Recent Episodes for Context <i data-lucide="check-circle"></i> *(v1.7.0)*
+- Setting key: `previousEpisodesLimit`
+- Description: Number of recent episodes passed to Graphiti's extraction pipeline as prior context (default: **2**). Graphiti's default is 10 — each episode is a full note body (~5–10K chars) JSON-encoded into every fan-out LLM call (extract_nodes, dedupe_nodes, extract_attributes, etc.). Capping at 2 reduces input tokens by ~80% on that window, yielding ~40–50% total sync cost reduction on large notes.
+- Range: 0–10 (slider). 0 = no prior context. Raising to 5–10 improves cross-episode entity dedup at higher token cost.
+- Developer Note: Serialized as `previous_episodes_limit` in `BridgeConfig` → `sync.py`. Applies at both the generic text path and the custom entity path.
+
+### Source Description Key <i data-lucide="check-circle"></i> *(v1.7.0)*
+- Setting key: `sourceDescriptionKey`
+- Description: Optional frontmatter key whose value overrides the `source_description` stored with each episode in Graphiti. When set (e.g. to `"mm_source"`), the note's `mm_source` frontmatter value wins over `frontmatter.type` and the default config fallback. Enables multi-writer Graphiti federation scenarios (Issue #11). Leave empty to keep existing behavior unchanged.
+- Developer Note: Serialized as `source_description_key` in `BridgeConfig` → `sync.py`. Applied at both sync paths before episode dispatch.
+
 ## Knowledge Namespacing
 
 Configure how knowledge is organized in the graph database.

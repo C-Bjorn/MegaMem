@@ -76,6 +76,11 @@ class BridgeConfig:
     # Episode source description
     source_description: Optional[str] = None
 
+    # Issue #11: configurable frontmatter property name whose value becomes source_description.
+    # When set, metadata[source_description_key] wins over frontmatter.type.
+    # e.g. source_description_key = "mm_source" → note's mm_source frontmatter value is used.
+    source_description_key: Optional[str] = None
+
     # Optional override of namespace group_id provided by TS side (pass-through like source_description)
     group_id: Optional[str] = None
 
@@ -83,6 +88,11 @@ class BridgeConfig:
     globally_ignored_fields: List[str] = field(default_factory=lambda: ['cssclass', 'mm_uid', 'mm_sync'])
     property_inclusion_mode: str = 'permissive'  # 'permissive' | 'strict'
     enabled_properties: Optional[Dict[str, List[str]]] = None  # { EntityType: [prop1, prop2] } for strict mode
+
+    # Cap on prior episodes fetched for context per sync (Phase 3 token-cost fix)
+    # When previous_episode_uuids is None, Graphiti defaults to last_n=10 (RELEVANT_SCHEMA_LIMIT).
+    # Capping to 2 cuts ~80% of the previous_episodes prompt block (~40-50% total token reduction).
+    previous_episodes_limit: int = 2
 
     # Wikilink extraction hints (Phase 5)
     wikilink_extraction_hints: bool = True
@@ -183,6 +193,9 @@ class BridgeConfig:
             source_description=config_dict.get(
                 'source_description') or config_dict.get('sourceDescription'),
 
+            # Issue #11: configurable frontmatter key for source_description override
+            source_description_key=config_dict.get('source_description_key') or config_dict.get('sourceDescriptionKey') or None,
+
             # Extraction instruction overrides
             global_extraction_instructions=config_dict.get('global_extraction_instructions') or config_dict.get('globalExtractionInstructions') or None,
 
@@ -193,6 +206,9 @@ class BridgeConfig:
             globally_ignored_fields=config_dict.get('globally_ignored_fields', config_dict.get('globallyIgnoredFields', ['cssclass', 'mm_uid', 'mm_sync'])),
             property_inclusion_mode=config_dict.get('property_inclusion_mode', config_dict.get('propertyInclusionMode', 'permissive')),
             enabled_properties=config_dict.get('enabled_properties', config_dict.get('enabledProperties')),
+
+            # Prior episode context cap (Phase 3 token-cost fix)
+            previous_episodes_limit=int(config_dict.get('previous_episodes_limit', config_dict.get('previousEpisodesLimit', 2))),
 
             # Wikilink extraction hints (Phase 5)
             wikilink_extraction_hints=config_dict.get('wikilink_extraction_hints', config_dict.get('wikilinkExtractionHints', True)),

@@ -1530,14 +1530,25 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         else:
             formatted_reference_time = reference_time
 
-        # Use source description from frontmatter.type if present; fall back to note_name for untyped notes
+        # Resolve source_description: sourceDescriptionKey lookup > frontmatter.type > config fallback
+        # Issue #11: when source_description_key is configured in settings, read that frontmatter
+        # property as the source_description override (wins over frontmatter.type). Full backward-
+        # compat: when not configured, existing behavior (frontmatter.type → config fallback) is unchanged.
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
-        if frontmatter_type:
+        source_description_key = getattr(config, 'source_description_key', None)
+        key_override = (
+            metadata.get(source_description_key)
+            if (source_description_key and metadata and isinstance(metadata, dict))
+            else None
+        )
+        if key_override:
+            source_description = str(key_override)
+        elif frontmatter_type:
             source_description = str(frontmatter_type)
         else:
-            # Phase 1: use note filename as source_description when no type (custom ontology disabled)
+            # Use note filename as source_description when no type (custom ontology disabled)
             source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
 
         # Merge frontmatter into the body if metadata is provided; otherwise use body as-is
@@ -1583,13 +1594,22 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         if database_type.lower() == 'neo4j':
             episode_kwargs['group_id'] = group_id
 
-        # Forward previous_episode_uuids from config when present (non-empty)
+        # Phase 3 token-cost fix: cap prior episode context (v0.29.0 upgrade).
+        # Saga path: TS side passes explicit UUIDs via config.previous_episode_uuids — use as-is.
+        # No-saga path: Graphiti default fetches last_n=10 (RELEVANT_SCHEMA_LIMIT), bloating prompts
+        # ~40-50%. We fetch only previous_episodes_limit (default 2) and pass UUIDs explicitly.
         prev_uuids = getattr(config, 'previous_episode_uuids', None)
-        if prev_uuids:
-            episode_kwargs['previous_episode_uuids'] = prev_uuids
+        if prev_uuids is None:
+            limit = getattr(config, 'previous_episodes_limit', 2)
+            recent = await graphiti.retrieve_episodes(
+                formatted_reference_time, last_n=limit, group_ids=[group_id]
+            )
+            prev_uuids = [ep.uuid for ep in recent]
             if debug_mode:
-                logger.debug(
-                    f"Received previous_episode_uuids from config: {prev_uuids}")
+                logger.debug(f"previous_episode_uuids: fetched {len(prev_uuids)} recent (limit={limit})")
+        elif debug_mode:
+            logger.debug(f"previous_episode_uuids: saga-provided {len(prev_uuids)} UUID(s)")
+        episode_kwargs['previous_episode_uuids'] = prev_uuids
 
         # Inject custom extraction instructions when provided (Graphiti v0.28.1+)
         if custom_extraction_instructions:
@@ -1649,11 +1669,22 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
         if not entity_types:
             return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid, episode_meta=episode_meta)
 
-        # Use source description from frontmatter type if available; fall back to note_name for untyped notes
+        # Resolve source_description: sourceDescriptionKey lookup > frontmatter.type > config fallback
+        # Issue #11: when source_description_key is configured in settings, read that frontmatter
+        # property as the source_description override (wins over frontmatter.type). Full backward-
+        # compat: when not configured, existing behavior (frontmatter.type → config fallback) is unchanged.
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
-        if frontmatter_type:
+        source_description_key = getattr(config, 'source_description_key', None)
+        key_override = (
+            metadata.get(source_description_key)
+            if (source_description_key and metadata and isinstance(metadata, dict))
+            else None
+        )
+        if key_override:
+            source_description = str(key_override)
+        elif frontmatter_type:
             source_description = str(frontmatter_type)
         else:
             source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
@@ -1705,13 +1736,22 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
         if database_type.lower() == 'neo4j':
             episode_kwargs['group_id'] = group_id
 
-        # Forward previous_episode_uuids from config when present (non-empty)
+        # Phase 3 token-cost fix: cap prior episode context (v0.29.0 upgrade).
+        # Saga path: TS side passes explicit UUIDs via config.previous_episode_uuids — use as-is.
+        # No-saga path: Graphiti default fetches last_n=10 (RELEVANT_SCHEMA_LIMIT), bloating prompts
+        # ~40-50%. We fetch only previous_episodes_limit (default 2) and pass UUIDs explicitly.
         prev_uuids = getattr(config, 'previous_episode_uuids', None)
-        if prev_uuids:
-            episode_kwargs['previous_episode_uuids'] = prev_uuids
+        if prev_uuids is None:
+            limit = getattr(config, 'previous_episodes_limit', 2)
+            recent = await graphiti.retrieve_episodes(
+                formatted_reference_time, last_n=limit, group_ids=[group_id]
+            )
+            prev_uuids = [ep.uuid for ep in recent]
             if debug_mode:
-                logger.debug(
-                    f"Received previous_episode_uuids from config: {prev_uuids}")
+                logger.debug(f"previous_episode_uuids: fetched {len(prev_uuids)} recent (limit={limit})")
+        elif debug_mode:
+            logger.debug(f"previous_episode_uuids: saga-provided {len(prev_uuids)} UUID(s)")
+        episode_kwargs['previous_episode_uuids'] = prev_uuids
 
         # Inject custom extraction instructions when provided (Graphiti v0.28.1+)
         if custom_extraction_instructions:

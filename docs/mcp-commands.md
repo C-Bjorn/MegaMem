@@ -164,6 +164,26 @@ List all available group IDs (namespaces) in the vault (aliases: mm, megamem, me
 
 **Parameters:** None
 
+### `manage_sagas`
+
+Manage sagas in the memory graph — list all sagas or summarize a specific saga. (aliases: mm, megamem, memory)
+
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `operation` | `string` | `list` or `summarize` | Yes | |
+| `saga_name` | `string` | Name of the saga to summarize (required for `summarize`) | No | |
+| `group_id` | `string` | Namespace to scope the query | No | server default |
+| `database_id` | `string` | Target a specific named database | No | |
+
+**Operations:**
+
+- **`list`** — Returns all sagas in the namespace. Each entry includes `uuid`, `name`, `group_id`, `summary`, `episode_count`, and `last_summarized_at`. No `saga_name` needed.
+- **`summarize`** — Incrementally summarizes a saga using only new episodes since the last summary. Returns the updated `summary`, `episode_count`, and `last_summarized_at`.
+
+> **Tip:** Use `list` first to discover saga names, then call `summarize` by name. Sagas are created automatically when notes are synced with `saga_name` set in frontmatter.
+
 ## Obsidian File Operations (via Obsidian CLI)
 
 > **ℹ️ Architecture Note:** These 10 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.

@@ -4,7 +4,7 @@
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
@@ -24,9 +24,9 @@ The plugin scans your vault's frontmatter and automatically infers entity types,
 
 Configure multiple named graph databases simultaneously — each with its own connection, type (Neo4j/FalkorDB), and embedding model. A **masterVault** runs the MCP server and manages all databases across all registered vaults. Tell Claude which database to query, or let it discover available databases with `list_databases`.
 
-### 🤖 21 MCP Tools for AI Assistants
+### 🤖 23 MCP Tools for AI Assistants
 
-A full MCP server (11 graph tools + 10 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
+A full MCP server (12 graph tools + 11 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
 
 ### 🏗️ Custom Ontology Manager
 
@@ -66,9 +66,9 @@ MegaMem is **stable in daily production use** and currently in public beta. We'r
 
 ## 🛠️ MCP Tools Reference
 
-All 22 tools are available to Claude Desktop and any MCP-compatible client.
+All 23 tools are available to Claude Desktop and any MCP-compatible client.
 
-### Graph Operations (11)
+### Graph Operations (12)
 
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
@@ -83,8 +83,9 @@ All 22 tools are available to Claude Desktop and any MCP-compatible client.
 | `list_group_ids`          | List all group IDs (namespaces) in the vault                                |
 | `list_databases`          | List all configured database targets — use before routing with `database_id` |
 | `clear_graph`             | Clear the entire memory graph (use with caution)                            |
+| `manage_sagas`            | List all sagas (`operation: "list"`) or summarize a saga (`operation: "summarize"`) |
 
-### Obsidian File Operations (10) — via Obsidian CLI
+### Obsidian File Operations (11) — via Obsidian CLI
 
 > Non-markdown files (`.pdf`, `.png`, `.csv`, `.base`, etc.) are supported across all file tools — the `_auto_md` fix skips `.md` auto-append when the path already has a recognized extension.
 
@@ -100,6 +101,7 @@ All 22 tools are available to Claude Desktop and any MCP-compatible client.
 | `manage_obsidian_folders`   | Create, rename, or delete vault folders                                             |
 | `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)                          |
 | `manage_obsidian_base`      | Manage Obsidian Bases `.base` files — operations: `list`, `views`, `query`, `create` |
+| `sync_obsidian_note`        | Sync a specific vault note to the graph on demand                                   |
 
 > Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — Updated for v1.5 with `database_id` routing on all graph tools.
 

@@ -61,7 +61,7 @@ import mcp.types as types
 MEGAMEM_INSTRUCTIONS = """\
 # megamem
 
-22 MCP tools in two categories. Shorthand: **"mm"** / **"my memory"** = graph tools. **"mv"** / **"my vault"** = Obsidian tools.
+23 MCP tools in two categories. Shorthand: **"mm"** / **"my memory"** = graph tools. **"mv"** / **"my vault"** = Obsidian tools.
 
 > For full parameter details on any tool, load: megamem://instructions/reference
 
@@ -88,6 +88,8 @@ MEGAMEM_INSTRUCTIONS = """\
 **Editing a `.base` file structure** → use `update_obsidian_note` with `full_file`. Use `manage_obsidian_base` for querying/listing only. `.base` files are **YAML**, not JSON. Minimal valid format: `views:\n  - type: table\n    name: My View\n    order:\n      - file.name`. The `filters` key requires `and`/`or`/`not` operator keys — do NOT use an empty array `[]`.
 
 **group_ids in search** — `search_memory_facts` and `search_memory_nodes` take `group_ids` as an **array**: `["namespace"]`.
+
+**Working with sagas** → `manage_sagas operation:list` to discover all sagas by name. Then `manage_sagas operation:summarize saga_name:<name>` to get a rolled-up narrative summary. Sagas are created automatically when notes are synced with `saga_name` set in note frontmatter.
 
 ## On-Demand Skills
 
@@ -182,6 +184,16 @@ No parameters.
 
 ### `list_databases`
 No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as `database_id`.
+
+### `manage_sagas`
+| Param | Required | Notes |
+|---|---|---|
+| `operation` | Yes | `list` or `summarize` |
+| `saga_name` | summarize | Name of the saga to summarize |
+| `group_id` | No | Namespace to scope query. Default: connected vault |
+| `database_id` | No | |
+
+`list` returns all sagas with `uuid`, `name`, `group_id`, `summary`, `episode_count`, `last_summarized_at`. `summarize` incrementally summarizes a saga using only new episodes since the last summary.
 
 ### `clear_graph`
 ⚠️ Destructive — always confirm first. No parameters.
@@ -305,7 +317,7 @@ No parameters."""
 try:
     import graphiti_core
     from graphiti_core import Graphiti
-    from graphiti_core.nodes import EpisodeType
+    from graphiti_core.nodes import EpisodeType, SagaNode
     from graphiti_core.edges import EntityEdge
     from graphiti_core.search.search_config_recipes import (
         NODE_HYBRID_SEARCH_RRF,
@@ -692,6 +704,33 @@ class ObsidianMegaMemMCPServer:
                          "last_n": {"type": "integer", "description": "Number of most recent episodes to retrieve", "default": 10},
                          "database_id": {"type": "string", "description": "Optional: target a specific named database (id or label from Databases settings)"}
                      }
+                }
+            ),
+            Tool(
+                name="manage_sagas",
+                description="Manage sagas in the memory graph — list all sagas or summarize a specific saga. (aliases: mm, megamem, memory)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["list", "summarize"],
+                            "description": "Operation to perform. 'list': list all sagas in the namespace (no saga_name needed). 'summarize': incrementally summarize a saga using only new episodes since the last summary."
+                        },
+                        "saga_name": {
+                            "type": "string",
+                            "description": "Name of the saga to summarize (required for 'summarize' operation)"
+                        },
+                        "group_id": {
+                            "type": "string",
+                            "description": "Namespace/group_id to scope the operation. Defaults to server default_namespace."
+                        },
+                        "database_id": {
+                            "type": "string",
+                            "description": "Optional: target a specific named database (id or label from Databases settings)"
+                        }
+                    },
+                    "required": ["operation"]
                 }
             ),
             Tool(
@@ -1357,6 +1396,122 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
                     "episodes": formatted_episodes,
                     "count": len(formatted_episodes)
                 }))]
+
+            elif name == "manage_sagas":
+                operation = arguments.get('operation')
+                if not operation:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False, "error": "operation is required ('list' or 'summarize')"
+                    }))]
+                database_id = arguments.get('database_id')
+                client = await self._get_graphiti_client(database_id)
+                group_id = arguments.get('group_id') or self.bridge_config.default_namespace
+
+                if operation == "list":
+                    # List all sagas in the namespace
+                    try:
+                        records, _, _ = await client.driver.execute_query(
+                            "MATCH (s:Saga {group_id: $group_id}) "
+                            "OPTIONAL MATCH (s)-[:HAS_EPISODE]->(e:Episodic) "
+                            "RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id, "
+                            "s.summary AS summary, s.last_summarized_at AS last_summarized_at, "
+                            "count(e) AS episode_count ORDER BY s.name",
+                            group_id=group_id, routing_='r',
+                        )
+                    except Exception as list_err:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "success": False, "error": f"Saga list failed: {list_err}"
+                        }))]
+                    sagas = [
+                        {
+                            "uuid": str(r['uuid']),
+                            "name": r['name'],
+                            "group_id": r['group_id'],
+                            "summary": r['summary'],
+                            "episode_count": r['episode_count'],
+                            "last_summarized_at": r['last_summarized_at'].isoformat() if r['last_summarized_at'] else None,
+                        }
+                        for r in records
+                    ]
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": True,
+                        "group_id": group_id,
+                        "count": len(sagas),
+                        "sagas": sagas,
+                    }))]
+
+                elif operation == "summarize":
+                    saga_name = arguments.get('saga_name')
+                    if not saga_name:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "success": False, "error": "saga_name is required for 'summarize' operation"
+                        }))]
+
+                    # Look up saga UUID by name — scoped to group_id when provided
+                    records = []
+                    try:
+                        records, _, _ = await client.driver.execute_query(
+                            "MATCH (s:Saga {name: $name, group_id: $group_id}) "
+                            "RETURN s.uuid AS uuid, s.name AS name",
+                            name=saga_name, group_id=group_id, routing_='r',
+                        )
+                    except Exception as lookup_err:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "success": False, "error": f"Saga lookup failed: {lookup_err}"
+                        }))]
+
+                    # Fallback: search by name only (all namespaces) if scoped lookup found nothing
+                    if not records:
+                        try:
+                            records, _, _ = await client.driver.execute_query(
+                                "MATCH (s:Saga {name: $name}) RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id LIMIT 1",
+                                name=saga_name, routing_='r',
+                            )
+                        except Exception:
+                            pass
+
+                    if not records:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "success": False,
+                            "error": f"No saga named '{saga_name}' found (searched group '{group_id}' and all namespaces)"
+                        }))]
+
+                    saga_uuid = records[0]['uuid']
+
+                    # Run incremental summarization via v0.29.0 public API
+                    try:
+                        saga_node = await client.summarize_saga(saga_uuid)
+                    except Exception as summarize_err:
+                        return [types.TextContent(type="text", text=json.dumps({
+                            "success": False, "error": f"summarize_saga failed: {summarize_err}"
+                        }))]
+
+                    # Fetch episode count
+                    episode_count = None
+                    try:
+                        count_records, _, _ = await client.driver.execute_query(
+                            "MATCH (s:Saga {uuid: $uuid})-[:HAS_EPISODE]->(e:Episodic) "
+                            "RETURN count(e) AS episode_count",
+                            uuid=saga_uuid, routing_='r',
+                        )
+                        if count_records:
+                            episode_count = count_records[0]['episode_count']
+                    except Exception:
+                        pass  # episode_count stays None — not critical
+
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": True,
+                        "saga_uuid": str(saga_node.uuid),
+                        "saga_name": saga_node.name,
+                        "summary": saga_node.summary,
+                        "episode_count": episode_count,
+                        "last_summarized_at": saga_node.last_summarized_at.isoformat() if saga_node.last_summarized_at else None
+                    }))]
+
+                else:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False, "error": f"Unknown operation '{operation}'. Valid: 'list', 'summarize'"
+                    }))]
 
             elif name == "clear_graph":
                 await self.megamem_client.close()
