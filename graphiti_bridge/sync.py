@@ -1525,15 +1525,19 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         else:
             formatted_reference_time = reference_time
 
-        # Use source description from frontmatter.type if present; fall back to note_name for untyped notes
+        # Use source description: config override wins (cross-writer federation use case),
+        # frontmatter.type as fallback, note_name as final default (Issue #11).
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
-        if frontmatter_type:
+        config_override = getattr(config, 'source_description', None) if config else None
+        if config_override:
+            source_description = config_override
+        elif frontmatter_type:
             source_description = str(frontmatter_type)
         else:
-            # Phase 1: use note filename as source_description when no type (custom ontology disabled)
-            source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
+            # Phase 1: use note filename as source_description (custom ontology disabled)
+            source_description = note_name or 'obsidian_mm_default'
 
         # Merge frontmatter into the body if metadata is provided; otherwise use body as-is
         merged_body = clean_text
@@ -1644,14 +1648,18 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
         if not entity_types:
             return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid, episode_meta=episode_meta)
 
-        # Use source description from frontmatter type if available; fall back to note_name for untyped notes
+        # Use source description: config override wins (cross-writer federation use case),
+        # frontmatter type as fallback, note_name as final default (Issue #11).
         frontmatter_type = None
         if metadata and isinstance(metadata, dict):
             frontmatter_type = metadata.get('type')
-        if frontmatter_type:
+        config_override = getattr(config, 'source_description', None) if config else None
+        if config_override:
+            source_description = config_override
+        elif frontmatter_type:
             source_description = str(frontmatter_type)
         else:
-            source_description = (getattr(config, 'source_description', None) if config else None) or note_name or 'obsidian_mm_default'
+            source_description = note_name or 'obsidian_mm_default'
 
         # Merge frontmatter into the body
         merged_body = clean_text
