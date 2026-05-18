@@ -109,6 +109,9 @@ class BridgeConfig:
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'BridgeConfig':
         """Create BridgeConfig from dictionary (JSON input)"""
 
+        database_name = cls._get_database_field(
+            config_dict, 'database_name', 'databaseName', 'neo4j', nested_key='database')
+
         # Handle both new (snake_case) and old (camelCase) field naming
         return cls(
             # LLM Configuration
@@ -130,14 +133,13 @@ class BridgeConfig:
                 'database_type') or config_dict.get('databaseType', 'neo4j'),
             database_url=cls._get_database_url_from_config(config_dict),
             database_username=cls._get_database_field(
-                config_dict, 'database_username', 'databaseUsername', 'neo4j'),
+                config_dict, 'database_username', 'databaseUsername', 'neo4j', nested_key='username'),
             database_password=cls._get_database_field(
-                config_dict, 'database_password', 'databasePassword', ''),
-            database_name=config_dict.get(
-                'database_name') or config_dict.get('databaseName', 'neo4j'),
+                config_dict, 'database_password', 'databasePassword', '', nested_key='password'),
+            database_name=database_name,
 
             # Provider-specific API keys (new format)
-            api_keys=config_dict.get('api_keys'),
+            api_keys=config_dict.get('api_keys') or config_dict.get('apiKeys'),
 
             # Legacy API keys (backward compatibility)
             llm_api_key=config_dict.get(
@@ -226,7 +228,37 @@ class BridgeConfig:
         )
 
     @classmethod
-    def _get_database_field(cls, config_dict: Dict[str, Any], snake_key: str, camel_key: str, default_value: str) -> Optional[str]:
+    def _get_current_database_config(cls, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        database_type = config_dict.get(
+            'database_type') or config_dict.get('databaseType', 'neo4j')
+        database_configs = config_dict.get('databaseConfigs', {})
+        if isinstance(database_configs, dict):
+            current_db_config = database_configs.get(database_type)
+            if isinstance(current_db_config, dict):
+                return current_db_config
+        return {}
+
+    @classmethod
+    def _get_primary_database_entry(cls, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        database_type = config_dict.get(
+            'database_type') or config_dict.get('databaseType', 'neo4j')
+        databases = config_dict.get('databases', [])
+        if not isinstance(databases, list):
+            return {}
+
+        for database in databases:
+            if (
+                isinstance(database, dict)
+                and database.get('type') == database_type
+                and database.get('category') != 'child-vault'
+                and database.get('enabled', True)
+            ):
+                return database
+
+        return {}
+
+    @classmethod
+    def _get_database_field(cls, config_dict: Dict[str, Any], snake_key: str, camel_key: str, default_value: str, nested_key: Optional[str] = None) -> Optional[str]:
         """Get database field with proper None handling for FalkorDB"""
         # Check snake_case first
         if snake_key in config_dict:
@@ -243,6 +275,17 @@ class BridgeConfig:
             if value is None:
                 return None
             return value if value else default_value
+
+        nested_field = nested_key or camel_key
+        for database_config in (
+            cls._get_primary_database_entry(config_dict),
+            cls._get_current_database_config(config_dict),
+        ):
+            if nested_field in database_config:
+                value = database_config[nested_field]
+                if value is None:
+                    return None
+                return value if value else default_value
 
         # Return default if neither key exists
         return default_value
@@ -267,9 +310,20 @@ class BridgeConfig:
         if direct_url:
             return direct_url
 
-        # Priority 2: Database-specific configuration based on type
+        # Priority 2: New multi-database list entry
         database_type = config_dict.get(
             'database_type') or config_dict.get('databaseType', 'neo4j')
+        primary_db = cls._get_primary_database_entry(config_dict)
+        if database_type == 'neo4j':
+            neo4j_uri = primary_db.get('uri')
+            if neo4j_uri:
+                return neo4j_uri
+        elif database_type == 'falkordb' and primary_db:
+            host = primary_db.get('host', 'localhost')
+            port = primary_db.get('port', 6379)
+            return f"falkor://{host}:{port}"
+
+        # Priority 3: Legacy database-specific configuration based on type
         database_configs = config_dict.get('databaseConfigs', {})
 
         if database_type == 'neo4j' and 'neo4j' in database_configs:
@@ -283,7 +337,7 @@ class BridgeConfig:
             port = falkor_config.get('port', 6379)
             return f"falkor://{host}:{port}"
 
-        # Priority 3: Fallback defaults based on database type
+        # Priority 4: Fallback defaults based on database type
         if database_type == 'falkordb':
             return "falkor://localhost:6379"
         else:  # neo4j default
