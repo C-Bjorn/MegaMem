@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 
@@ -6,7 +7,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def _extract_method_body(source: str, method_name: str) -> str:
     marker = f"{method_name}(){{"
-    start = source.index(marker) + len(marker)
+    try:
+        start = source.index(marker) + len(marker)
+    except ValueError:
+        pytest.fail(f"marker not found in source: {marker!r}")
     depth = 1
     index = start
 
@@ -37,10 +41,18 @@ def test_packaged_connection_tests_prefer_current_database_entries():
 def test_mcp_server_bridge_config_uses_shared_config_parser():
     server_source = (PROJECT_ROOT / "mcp-server" / "megamem_mcp_server.py").read_text()
 
-    method_start = server_source.index("    def _create_bridge_config(")
-    method_end = server_source.index(
-        "    def _get_database_url_from_obsidian_config", method_start
-    )
+    try:
+        method_start = server_source.index("    def _create_bridge_config(")
+    except ValueError:
+        pytest.fail("_create_bridge_config not found in megamem_mcp_server.py")
+
+    try:
+        method_end = server_source.index(
+            "    async def _ensure_obsidian_running", method_start
+        )
+    except ValueError:
+        pytest.fail("_ensure_obsidian_running not found after _create_bridge_config")
+
     method_body = server_source[method_start:method_end]
 
     assert "BridgeConfig.from_dict" in method_body

@@ -110,3 +110,40 @@ def test_from_dict_accepts_camel_case_api_keys():
     assert config.api_keys == {"openai": "openai-key"}
     assert config.get_effective_llm_api_key() == "openai-key"
     assert config.get_effective_embedder_api_key() == "openai-key"
+
+
+def test_from_dict_skips_disabled_database_entry():
+    config = BridgeConfig.from_dict(
+        {
+            "databaseType": "neo4j",
+            "databaseConfigs": {
+                "neo4j": {
+                    "uri": "bolt://legacy.example:7687",
+                    "username": "legacy-user",
+                    "password": "legacy-pass",
+                    "database": "legacy-db",
+                }
+            },
+            "databases": [
+                {
+                    "id": "disabled",
+                    "type": "neo4j",
+                    "category": "primary",
+                    "enabled": False,
+                    "uri": "bolt://disabled.example:7687",
+                    "username": "disabled-user",
+                    "password": "disabled-pass",
+                    "database": "disabled-db",
+                }
+            ],
+            "llmProvider": "ollama",
+            "llmModel": "llama3",
+            "embedderProvider": "ollama",
+            "embeddingModel": "nomic-embed-text",
+        }
+    )
+
+    assert config.database_url == "bolt://legacy.example:7687"
+    assert config.database_username == "legacy-user"
+    assert config.database_password == "legacy-pass"
+    assert config.database_name == "legacy-db"

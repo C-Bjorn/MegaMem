@@ -2597,35 +2597,6 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
 
         return BridgeConfig.from_dict(config_payload)
 
-    def _get_database_url_from_obsidian_config(self, obsidian_config: Dict, database_type: str, current_db_config: Dict) -> str:
-        """Get database URL from Obsidian plugin configuration with proper priority"""
-        # 1. Check for direct databaseUrl in plugin settings
-        if "databaseUrl" in obsidian_config:
-            url = obsidian_config["databaseUrl"]
-            logger.info(
-                f"[DB-CONFIG] Using direct databaseUrl from plugin: {url}")
-            return url
-
-        # 2. Check database-specific configuration (Neo4j uses 'uri', FalkorDB builds from host/port)
-        if database_type == "neo4j" and "uri" in current_db_config:
-            url = current_db_config["uri"]
-            logger.info(
-                f"[DB-CONFIG] Using Neo4j URI from databaseConfigs: {url}")
-            return url
-        elif database_type == "falkordb":
-            host = current_db_config.get("host", "localhost")
-            port = current_db_config.get("port", 6379)
-            url = f"bolt://{host}:{port}"
-            logger.info(
-                f"[DB-CONFIG] Built FalkorDB URL from databaseConfigs: {url}")
-            return url
-
-        # 3. Final fallback
-        fallback_url = "bolt://localhost:7687"
-        logger.warning(
-            f"[DB-CONFIG] No database URL found in config, using fallback: {fallback_url}")
-        return fallback_url
-
     # @vessel-protocol:Baldr governs:launch context:Obsidian auto-launch and process detection for seamless user experience
     # @inter-dependencies: [psutil, subprocess, obsidian config]
     # @purpose: Ensure Obsidian is running before proceeding with MCP operations
