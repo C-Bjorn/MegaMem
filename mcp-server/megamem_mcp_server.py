@@ -2585,78 +2585,16 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
         return client
 
     def _create_bridge_config(self, obsidian_config: Dict, config_path: str) -> BridgeConfig:
-        """Create BridgeConfig from Obsidian config"""
-        database_type = obsidian_config.get("databaseType", "neo4j")
-        database_configs = obsidian_config.get("databaseConfigs", {})
-        current_db_config = database_configs.get(database_type, {})
+        """Create BridgeConfig from Obsidian config — delegates all credential resolution to BridgeConfig.from_dict()"""
+        resolved_namespace = self.vault_resolver.get_active_namespace(obsidian_config)
 
-        # Fallback: find the primary database entry from the new `databases` array
-        # (UI writes credentials here; databaseConfigs may be stale/empty)
-        _primary_db = next(
-            (db for db in obsidian_config.get("databases", [])
-             if db.get("type") == database_type
-             and db.get("category") != "child-vault"
-             and db.get("enabled", True)),
-            {}
-        )
+        config_payload = dict(obsidian_config)
+        config_payload["defaultNamespace"] = resolved_namespace
+        config_payload["modelsPath"] = str(Path(config_path).parent)
+        config_payload["notes"] = []
+        config_payload["debug"] = False
 
-        # Resolve database URL from plugin settings
-        database_url = self._get_database_url_from_obsidian_config(
-            obsidian_config, database_type, current_db_config)
-
-        resolved_namespace = self.vault_resolver.get_active_namespace(
-            obsidian_config)
-
-        return BridgeConfig(
-            llm_provider=obsidian_config.get("llmProvider", "openai"),
-            llm_model=obsidian_config.get("llmModel", "gpt-4o"),
-            embedder_provider=obsidian_config.get(
-                "embedderProvider", "openai"),
-            embedding_model=obsidian_config.get(
-                "embeddingModel", "text-embedding-3-small"),
-            database_type=database_type,
-            database_url=database_url,
-            database_username=current_db_config.get("username") or _primary_db.get("username") or obsidian_config.get("databaseUsername"),
-            database_password=current_db_config.get("password") or _primary_db.get("password") or obsidian_config.get("databasePassword"),
-            database_name=current_db_config.get("database") or _primary_db.get("database") or obsidian_config.get("databaseName", "neo4j"),
-            default_namespace=resolved_namespace,
-            use_custom_ontology=obsidian_config.get(
-                "useCustomOntology", False),
-            api_keys=obsidian_config.get("apiKeys", {}),
-            models_path=str(Path(config_path).parent),
-            graph_view_id=obsidian_config.get("graphViewId", "default"),
-            notes=[],
-            debug=False
-        )
-
-    def _get_database_url_from_obsidian_config(self, obsidian_config: Dict, database_type: str, current_db_config: Dict) -> str:
-        """Get database URL from Obsidian plugin configuration with proper priority"""
-        # 1. Check for direct databaseUrl in plugin settings
-        if "databaseUrl" in obsidian_config:
-            url = obsidian_config["databaseUrl"]
-            logger.info(
-                f"[DB-CONFIG] Using direct databaseUrl from plugin: {url}")
-            return url
-
-        # 2. Check database-specific configuration (Neo4j uses 'uri', FalkorDB builds from host/port)
-        if database_type == "neo4j" and "uri" in current_db_config:
-            url = current_db_config["uri"]
-            logger.info(
-                f"[DB-CONFIG] Using Neo4j URI from databaseConfigs: {url}")
-            return url
-        elif database_type == "falkordb":
-            host = current_db_config.get("host", "localhost")
-            port = current_db_config.get("port", 6379)
-            url = f"bolt://{host}:{port}"
-            logger.info(
-                f"[DB-CONFIG] Built FalkorDB URL from databaseConfigs: {url}")
-            return url
-
-        # 3. Final fallback
-        fallback_url = "bolt://localhost:7687"
-        logger.warning(
-            f"[DB-CONFIG] No database URL found in config, using fallback: {fallback_url}")
-        return fallback_url
+        return BridgeConfig.from_dict(config_payload)
 
     # @vessel-protocol:Baldr governs:launch context:Obsidian auto-launch and process detection for seamless user experience
     # @inter-dependencies: [psutil, subprocess, obsidian config]
