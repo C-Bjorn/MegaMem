@@ -5,9 +5,9 @@
   "author": "Casey Bjørn",
   "authorUrl": "https://github.com/C-Bjorn/MegaMem",
   "fundingUrl": "https://github.com/sponsors/C-Bjorn",
-  "version": "1.7.1",
-  "pythonBridgeVersion": "1.7.1",
-  "mcpServerVersion": "1.7.1",
+  "version": "1.7.2",
+  "pythonBridgeVersion": "1.7.2",
+  "mcpServerVersion": "1.7.2",
   "minAppVersion": "1.12.4",
   "main": "main.js",
   "isDesktopOnly": true
