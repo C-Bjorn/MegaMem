@@ -214,7 +214,7 @@ Search for notes in Obsidian vault by filename and/or content (aliases: mv, my v
 
 ### `read_obsidian_note`
 
-Read a specific note from Obsidian (aliases: mv, my vault, obsidian)
+Read a specific note from Obsidian (aliases: mv, my vault, obsidian). `path` also accepts an `obsidian://open?vault=X&file=Y` URI — vault and file path are extracted automatically.
 
 **Parameters:**
 
@@ -226,7 +226,7 @@ Read a specific note from Obsidian (aliases: mv, my vault, obsidian)
 
 ### `update_obsidian_note`
 
-Update content of an existing note using various editing modes (aliases: mv, my vault, obsidian).
+Update content of an existing note using various editing modes (aliases: mv, my vault, obsidian). `path` also accepts an `obsidian://open?vault=X&file=Y` URI — vault and file path are extracted automatically.
 
 Editing Modes:
 - full_file: Replace entire file content (default, backward compatible)
@@ -261,7 +261,7 @@ Required parameters vary by mode:
 
 ### `create_obsidian_note`
 
-Create a new note in Obsidian (aliases: mv, my vault, obsidian)
+Create a new note in Obsidian (aliases: mv, my vault, obsidian). `path` also accepts an `obsidian://open?vault=X&file=Y` URI — vault and file path are extracted automatically.
 
 **Parameters:**
 
@@ -353,21 +353,28 @@ Manage folders in Obsidian vault - create, rename/move, delete, or clone folders
 
 ### `manage_obsidian_notes`
 
-Delete, rename/move, or copy notes in Obsidian vault (aliases: mv, my vault, obsidian)
+Delete, rename/move, copy, or cross-vault copy/move notes in Obsidian vault (aliases: mv, my vault, obsidian). `path`, `newPath`, and `targetPath` also accept an `obsidian://open?vault=X&file=Y` URI — vault and file path are extracted automatically.
 
 **Parameters:**
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `operation` | `string` | The operation to perform: `rename`, `delete`, `copy` | Yes | |
+| `operation` | `string` | The operation to perform: `rename`, `delete`, `copy`, `copy_to_vault`, `move_to_vault` | Yes | |
 | `path` | `string` | The note path. `.md` is auto-appended if missing | Yes | |
-| `newPath` | `string` | Destination path — required for `rename` and `copy`. Cross-folder moves auto-detected for rename. | No | |
-| `vault_id` | `string` | Optional vault ID to target specific vault | No | |
+| `newPath` | `string` | Destination path — required for `rename` and `copy` (same vault only). Cross-folder moves auto-detected for rename. | No | |
+| `vault_id` | `string` | Optional vault ID to target specific vault. Source vault for `copy_to_vault`/`move_to_vault`. | No | |
+| `targetVaultId` | `string` | Target vault ID — required for `copy_to_vault`/`move_to_vault`. The note is written here. | No | |
+| `targetPath` | `string` | Target note path in `targetVaultId` — required for `copy_to_vault`/`move_to_vault`. | No | |
+| `overwrite` | `boolean` | `copy_to_vault`/`move_to_vault` only. If `true`, allow overwriting an existing note at `targetPath`. Default `false` — fails with `TARGET_EXISTS` if the target already exists. | No | `false` |
 
 **Operations:**
 - `rename` — rename or move note; updates internal wikilinks
 - `delete` — move to trash
 - `copy` — duplicate note to `newPath` using `vault.copy()`. Does NOT update wikilinks (source links unchanged).
+- `copy_to_vault` — duplicate the note into a different vault (`targetVaultId` + `targetPath`)
+- `move_to_vault` — move the note into a different vault; deletes the source only after the target write is verified
+
+> **Cross-vault ops** _(v1.7.4)_: No native Obsidian API supports a cross-vault file handle, so `copy_to_vault`/`move_to_vault` orchestrate a read from the source vault and a write to the target vault as a single MCP call. `move_to_vault` deletes the source **only after** the target write is verified — if the delete fails after a successful write, the response returns `error_code: "MOVE_PARTIAL"` (copy succeeded, source cleanup failed; the note is never silently duplicated or lost). Both responses include a `warnings` array listing any `[[wikilinks]]`/`![[embeds]]` found in the note body, since those references won't resolve across vaults.
 
 ### `sync_obsidian_note`
 

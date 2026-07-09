@@ -224,12 +224,81 @@ class CLIFileTools:
         path: str,
         vault_id: Optional[str] = None,
         newPath: Optional[str] = None,
+        target_vault_id: Optional[str] = None,
+        target_path: Optional[str] = None,
+        overwrite: bool = False,
     ) -> Dict[str, Any]:
+        if operation in ("copy_to_vault", "move_to_vault"):
+            return await self._manage_notes_cross_vault(
+                operation, path, vault_id, target_vault_id, target_path, overwrite
+            )
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
         return await asyncio.to_thread(
             self.cli.manage_obsidian_notes, vault, operation, path, newPath
+        )
+
+    async def _manage_notes_cross_vault(
+        self,
+        operation: str,
+        path: str,
+        vault_id: Optional[str],
+        target_vault_id: Optional[str],
+        target_path: Optional[str],
+        overwrite: bool,
+    ) -> Dict[str, Any]:
+        """Day75.05: orchestrate copy_to_vault / move_to_vault across two vaults
+        via sequenced CLI calls (no native cross-vault Vault API exists).
+        """
+        if isinstance(overwrite, str):
+            overwrite = overwrite.lower() in ("true", "1", "yes")
+        vault, err = self._resolve_vault(vault_id)
+        if err:
+            return err
+        if not target_vault_id:
+            return {
+                "success": False,
+                "error": "target_vault_id is required for copy_to_vault/move_to_vault",
+                "error_code": "MISSING_TARGET_VAULT",
+            }
+        if not target_path:
+            return {
+                "success": False,
+                "error": "target_path is required for copy_to_vault/move_to_vault",
+                "error_code": "MISSING_TARGET_PATH",
+            }
+        fn = (
+            self.cli.copy_note_cross_vault
+            if operation == "copy_to_vault"
+            else self.cli.move_note_cross_vault
+        )
+        return await asyncio.to_thread(fn, vault, path, target_vault_id, target_path, overwrite)
+
+    async def copy_note_cross_vault(
+        self,
+        path: str,
+        target_path: str,
+        vault_id: Optional[str] = None,
+        target_vault_id: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        return await self.manage_obsidian_notes(
+            "copy_to_vault", path, vault_id,
+            target_vault_id=target_vault_id, target_path=target_path, overwrite=overwrite,
+        )
+
+    async def move_note_cross_vault(
+        self,
+        path: str,
+        target_path: str,
+        vault_id: Optional[str] = None,
+        target_vault_id: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        return await self.manage_obsidian_notes(
+            "move_to_vault", path, vault_id,
+            target_vault_id=target_vault_id, target_path=target_path, overwrite=overwrite,
         )
 
     async def manage_obsidian_folders(

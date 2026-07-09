@@ -13,8 +13,6 @@ import json
 import asyncio
 import argparse
 import contextlib
-from contextvars import ContextVar
-from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import socket
@@ -265,12 +263,17 @@ Obsidian must be running with MegaMem active. Sync is asynchronous. This is NOT 
 ### `manage_obsidian_notes`
 | Param | Required | Notes |
 |---|---|---|
-| `operation` | Yes | `rename`, `delete`, `copy` |
+| `operation` | Yes | `rename`, `delete`, `copy`, `copy_to_vault`, `move_to_vault` |
 | `path` | Yes | |
 | `newPath` | rename / copy | Cross-folder moves auto-detected for rename. For `copy`: destination path for the new file. |
-| `vault_id` | No | |
+| `vault_id` | No | Source vault for `copy_to_vault`/`move_to_vault`. |
+| `targetVaultId` | copy_to_vault / move_to_vault | Target vault — the note is written here. |
+| `targetPath` | copy_to_vault / move_to_vault | Target note path in `targetVaultId`. |
+| `overwrite` | No | copy_to_vault/move_to_vault only. Default false — fails with `TARGET_EXISTS` if `targetPath` already exists. |
 
 Note: `copy` does NOT update wikilinks (unlike `rename`) — this is expected behavior.
+
+**Cross-vault ops (Day75.05):** no native Obsidian API supports a cross-vault handle, so `copy_to_vault`/`move_to_vault` orchestrate a read from the source vault and a write to the target vault as one MCP call. `move_to_vault` deletes the source ONLY after the target write is verified — if the delete fails after a successful write, the response has `error_code: "MOVE_PARTIAL"` (copy succeeded, source cleanup failed; never silently duplicated or lost). Both responses include a `warnings` array listing any `[[wikilinks]]`/`![[embeds]]` found in the body, since those won't resolve across vaults. Use `copy_to_vault` for registry/template provisioning between vaults (e.g. Bjorn vault → EndoVault).
 
 ### `manage_obsidian_folders`
 | Param | Required | Notes |
@@ -334,9 +337,10 @@ except ImportError as e:
 try:
     from websocket_server import WebSocketServer
     from file_tools import FileTools
-    from vault_resolver import VaultResolver
+    from vault_resolver import VaultResolver, parse_obsidian_uri
 except ImportError:
     WebSocketServer, FileTools, VaultResolver = None, None, None
+    parse_obsidian_uri = None  # type: ignore
 
 # CLI file tools — optional, activated via MEGAMEM_USE_CLI=true env var
 try:
@@ -386,23 +390,14 @@ OBSIDIAN_FILE_OPERATIONS = {
 
 # --- Token-Scoped Access Control ---
 
-@dataclass
-class TokenProfile:
-    """Per-token access policy for the Streamable HTTP transport.
-    @purpose: Allowlist-based tool gating per bearer token @depends: httpTokenProfiles in data.json @results: Server-side MCP access control
-    """
-    id: str = ''
-    label: str = ''
-    token: str = ''
-    # Empty lists = no restriction (admin). Non-empty = strict allowlist.
-    allowed_tools: List[str] = dc_field(default_factory=list)
-    allowed_group_ids: List[str] = dc_field(default_factory=list)
-    allowed_databases: List[str] = dc_field(default_factory=list)
-    allowed_vaults: List[str] = dc_field(default_factory=list)
-
-# Set by BearerAuthMiddleware on each HTTP request; read by list_tools / call_tool.
-# Default None = stdio mode (no profile → full access).
-current_token_profile: ContextVar[Optional[TokenProfile]] = ContextVar('current_token_profile', default=None)
+# TokenProfile, current_token_profile, and the cross-vault permission check
+# live in vault_permissions.py (dependency-free) so they're unit-testable
+# without importing this module's heavy graphiti-core dependency chain.
+from vault_permissions import (
+    TokenProfile,
+    current_token_profile,
+    check_cross_vault_permission as _check_cross_vault_permission,
+)
 
 # Tools that accept group_ids (plural list) — override target for namespace enforcement
 _TOOLS_WITH_GROUP_IDS = frozenset({
@@ -856,7 +851,7 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="read_obsidian_note",
-                description="Read a specific note from Obsidian (aliases: mv, my vault, obsidian)",
+                description="Read a specific note from Obsidian (aliases: mv, my vault, obsidian). Path may omit .md for markdown notes; non-markdown files must include their real extension. Also accepts an obsidian:// URI (e.g. obsidian://open?vault=X&file=Y) — vault and file path are extracted automatically.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -873,7 +868,7 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="update_obsidian_note",
-                description="Update content of an existing note using various editing modes: full_file, frontmatter_only, append_only, range_based, editor_based (aliases: mv, my vault, obsidian, update note, edit note). For range_based mode, always call read_obsidian_note with include_line_map=true first to get exact line numbers.",
+                description="Update content of an existing note using various editing modes: full_file, frontmatter_only, append_only, range_based, editor_based (aliases: mv, my vault, obsidian, update note, edit note). For range_based mode, always call read_obsidian_note with include_line_map=true first to get exact line numbers. Path may omit .md for markdown notes; non-markdown files must include their real extension. Also accepts an obsidian:// URI — vault and file path are extracted automatically.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -923,7 +918,7 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="create_obsidian_note",
-                description="Create a new note in Obsidian (aliases: mv, my vault, obsidian)",
+                description="Create a new note in Obsidian (aliases: mv, my vault, obsidian). Path may omit .md for markdown notes; non-markdown files must include their real extension. Also accepts an obsidian:// URI — vault and file path are extracted automatically.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1026,26 +1021,38 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             ),
             Tool(
                 name="manage_obsidian_notes",
-                description="Delete, rename, or copy notes in Obsidian vault (aliases: mv, my vault, obsidian)",
+                description="Delete, rename, copy, or cross-vault copy/move notes in Obsidian vault (aliases: mv, my vault, obsidian). Path may omit .md for markdown notes; non-markdown files must include their real extension. path/newPath/targetPath also accept an obsidian:// URI — vault and file path are extracted automatically. 'copy_to_vault'/'move_to_vault' orchestrate a read from vault_id and a write to targetVaultId in a single call (no native cross-vault Vault API exists) — fails if targetPath already exists unless overwrite=true; response includes a warnings field listing any [[wikilinks]]/![[embeds]] found, since they won't resolve across vaults; a failed source-delete after a successful move write returns error_code MOVE_PARTIAL (never silently duplicates or loses data).",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "operation": {
                             "type": "string",
-                            "enum": ["delete", "rename", "copy"],
-                            "description": "The operation to perform. 'copy' duplicates the note to newPath (can include a new filename to rename on copy)."
+                            "enum": ["delete", "rename", "copy", "copy_to_vault", "move_to_vault"],
+                            "description": "The operation to perform. 'copy' duplicates the note to newPath within the same vault. 'copy_to_vault'/'move_to_vault' transfer the note to a different vault (targetVaultId + targetPath required); 'move_to_vault' deletes the source only after the target write is verified."
                         },
                         "path": {
                             "type": "string",
-                            "description": "The note path for delete/copy, or the old path for rename"
+                            "description": "The note path for delete/copy/copy_to_vault/move_to_vault, or the old path for rename"
                         },
                         "newPath": {
                             "type": "string",
-                            "description": "The destination path (required for rename and copy operations)"
+                            "description": "The destination path (required for rename and copy operations, same vault only)"
                         },
                         "vault_id": {
                             "type": "string",
-                            "description": "Optional vault ID to target specific vault"
+                            "description": "Optional vault ID to target specific vault. Source vault for copy_to_vault/move_to_vault."
+                        },
+                        "targetVaultId": {
+                            "type": "string",
+                            "description": "Target vault ID (required for copy_to_vault/move_to_vault) — the note is written here."
+                        },
+                        "targetPath": {
+                            "type": "string",
+                            "description": "Target note path in targetVaultId (required for copy_to_vault/move_to_vault)."
+                        },
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "For copy_to_vault/move_to_vault: if true, allow overwriting an existing note at targetPath. Default false — fails with TARGET_EXISTS if the target already exists."
                         }
                     },
                     "required": ["operation", "path"]
@@ -1774,6 +1781,20 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             }))]
 
         try:
+            # Resolve obsidian:// URIs in path/newPath before any routing below, so both
+            # backends (WebSocket FileTools and CLI-based CLIFileTools) and every handler
+            # branch (manage_obsidian_folders, manage_obsidian_notes, generic dispatch) see
+            # a plain vault-relative path. If the URI carries a vault and the caller didn't
+            # already pass one explicitly, use it to fill in vault_id.
+            if parse_obsidian_uri:
+                for path_key in ("path", "newPath", "targetPath"):
+                    raw_value = arguments.get(path_key)
+                    if isinstance(raw_value, str) and raw_value.startswith("obsidian://"):
+                        resolved_path, uri_vault = parse_obsidian_uri(raw_value)
+                        arguments[path_key] = resolved_path
+                        if uri_vault and not arguments.get("vault_id") and not arguments.get("vaultId"):
+                            arguments["vault_id"] = uri_vault
+
             # @@vessel-protocol:Bifrost governs:integration context:Unified folder management routing via operation parameter
             if name == "manage_obsidian_folders":
                 return await self._handle_manage_obsidian_folders(arguments)
@@ -2441,10 +2462,33 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
                         "error": "Missing required parameter 'newPath' for copy operation"
                     }))]
                 result = await self.file_tools.manage_obsidian_notes("copy", path, vault_id, new_path)
+            elif operation in ("copy_to_vault", "move_to_vault"):
+                target_vault_id = arguments.get("targetVaultId")
+                target_path = arguments.get("targetPath")
+                overwrite = arguments.get("overwrite", False)
+                if not target_vault_id:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": f"Missing required parameter 'targetVaultId' for {operation} operation"
+                    }))]
+                if not target_path:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "success": False,
+                        "error": f"Missing required parameter 'targetPath' for {operation} operation"
+                    }))]
+                # Combined read(source) + write(target) permission check — fails
+                # fast naming which side is denied (Day75.05 security requirement).
+                perm_error = _check_cross_vault_permission(vault_id, target_vault_id)
+                if perm_error:
+                    return [types.TextContent(type="text", text=json.dumps(perm_error))]
+                result = await self.file_tools.manage_obsidian_notes(
+                    operation, path, vault_id,
+                    target_vault_id=target_vault_id, target_path=target_path, overwrite=overwrite,
+                )
             else:
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": False,
-                    "error": f"Invalid operation '{operation}'. Must be one of: delete, rename, copy"
+                    "error": f"Invalid operation '{operation}'. Must be one of: delete, rename, copy, copy_to_vault, move_to_vault"
                 }))]
 
             return [types.TextContent(type="text", text=json.dumps(result))]

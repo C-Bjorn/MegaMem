@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +24,49 @@ logger = logging.getLogger(__name__)
 # Content larger than this threshold is written via eval+tempfile instead of CLI argv.
 # Windows CreateProcess caps the command line at 8191 chars; 4096 is a safe margin.
 _LARGE_CONTENT_THRESHOLD = 4096
+
+# Known non-markdown vault file extensions (lowercase, no leading dot).
+# _auto_md() only skips appending ".md" when a path's trailing suffix exactly
+# matches one of these — anything else (including dotted note stems like
+# "Day46.01 - Some Note") is treated as a markdown note title. See Day75.03.
+KNOWN_VAULT_EXTENSIONS = frozenset(
+    {
+        "md",
+        "pdf",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "webp",
+        "canvas",
+        "base",
+        "csv",
+        "json",
+        "txt",
+        "html",
+        "htm",
+        "xml",
+        "yaml",
+        "yml",
+        "toml",
+        "mp3",
+        "mp4",
+        "mov",
+        "webm",
+        "wav",
+        "ogg",
+        "m4a",
+        "flac",
+        "zip",
+        "gz",
+        "tar",
+    }
+)
+
+# Matches [[wikilinks]] and ![[embeds]] — used to warn callers that cross-vault
+# copy/move carries link syntax verbatim, which may dangle in the target vault.
+_WIKILINK_RE = re.compile(r"(!)?\[\[([^\]]+)\]\]")
 
 # ─── Binary Detection ─────────────────────────────────────────────────────────
 
@@ -197,18 +241,27 @@ class ObsidianCLI:
 
     @staticmethod
     def _auto_md(path: str) -> str:
-        """Append .md only when the path has no file extension.
-        Uses os.path.splitext to distinguish real extensions (.pdf, .png, .csv)
-        from dotted note stems like 'Day46.01 - Some Note' (no ext → .md appended).
+        """Append .md unless the path's trailing suffix is a known non-markdown
+        vault file extension.
+
+        Regression fix (Day75.03): os.path.splitext() alone can't tell a real
+        extension apart from a dotted note stem like 'Day46.01 - Some Note' —
+        splitext treats '.01 - Some Note' as the "extension" and skips the
+        .md append, causing FILE_NOT_FOUND on valid notes. Only skip appending
+        .md when the suffix exactly (case-insensitively) matches a known
+        vault file extension; everything else is treated as a note title.
+
         Examples:
-          'Day46.01 - Some Note'  → 'Day46.01 - Some Note.md'   (no ext)
-          'notes/my-note'         → 'notes/my-note.md'           (no ext)
-          'file.pdf'              → 'file.pdf'                    (has ext)
-          'image.png'             → 'image.png'                   (has ext)
-          'note.md'               → 'note.md'                     (already .md)
+          'Day09.02 - Zep Local MCP Server' → 'Day09.02 - Zep Local MCP Server.md'  (dotted stem, not a known ext)
+          'notes/my-note'                   → 'notes/my-note.md'                    (no ext)
+          'file.pdf'                        → 'file.pdf'                            (known ext)
+          'UPPERCASE.PDF'                   → 'UPPERCASE.PDF'                       (case-insensitive match)
+          'note.md'                         → 'note.md'                             (already .md)
         """
         _, ext = os.path.splitext(path)
-        return path if ext else path + ".md"
+        if ext and ext[1:].lower() in KNOWN_VAULT_EXTENSIONS:
+            return path
+        return path + ".md"
 
     def _write_via_eval(self, vault: str, path: str, content: str, verb: str) -> tuple[str, int]:
         """Write large content via OS temp file + Obsidian eval, bypassing argv size limits.
@@ -944,6 +997,160 @@ class ObsidianCLI:
             return self._err(out or f"Operation '{operation}' failed on: {path}")
 
         return self._ok({"path": path, "newPath": new_path, "operation": operation, "message": out})
+
+    # ─── Cross-Vault Copy/Move (Day75.05) ────────────────────────────────────
+    #
+    # No native Obsidian Vault API for cross-vault handles — this orchestrates
+    # per-vault CLI calls (read src -> write dst -> verify -> [delete src]) in
+    # sequence, from within this MCP server process, so the operation appears
+    # as a single atomic-looking call from the caller's side.
+
+    def _vault_reachable(self, vault: str) -> bool:
+        """Cheap reachability probe used as a preflight check before any
+        cross-vault transfer step runs.
+        """
+        out, code = self._run(vault, "files", timeout=10)
+        return code == 0 and not out.startswith("Error:")
+
+    def _scan_cross_vault_links(self, content: str) -> list[str]:
+        """Return distinct wikilink/embed targets found in content.
+        Link syntax transfers verbatim across vaults and may dangle in the
+        target — callers get this list to decide whether to resolve them.
+        """
+        seen: list[str] = []
+        for is_embed, target in _WIKILINK_RE.findall(content):
+            label = f"embed: [[{target}]]" if is_embed else f"wikilink: [[{target}]]"
+            if label not in seen:
+                seen.append(label)
+        return seen
+
+    def copy_note_cross_vault(
+        self,
+        src_vault: str,
+        src_path: str,
+        dst_vault: str,
+        dst_path: str,
+        overwrite: bool = False,
+    ) -> dict:
+        """Copy a note from src_vault to dst_vault via CLI orchestration.
+        Source is left untouched. See _cross_vault_transfer for the sequence.
+        """
+        return self._cross_vault_transfer(
+            src_vault, src_path, dst_vault, dst_path, overwrite, delete_source=False
+        )
+
+    def move_note_cross_vault(
+        self,
+        src_vault: str,
+        src_path: str,
+        dst_vault: str,
+        dst_path: str,
+        overwrite: bool = False,
+    ) -> dict:
+        """Move a note from src_vault to dst_vault via CLI orchestration.
+        Source is deleted ONLY after the target write is verified. A failed
+        delete after a successful write returns MOVE_PARTIAL — never silently
+        duplicates or loses data. See _cross_vault_transfer for the sequence.
+        """
+        return self._cross_vault_transfer(
+            src_vault, src_path, dst_vault, dst_path, overwrite, delete_source=True
+        )
+
+    def _cross_vault_transfer(
+        self,
+        src_vault: str,
+        src_path: str,
+        dst_vault: str,
+        dst_path: str,
+        overwrite: bool,
+        delete_source: bool,
+    ) -> dict:
+        src_path = self._auto_md(src_path)
+        dst_path = self._auto_md(dst_path)
+        operation = "move_to_vault" if delete_source else "copy_to_vault"
+
+        # Preflight: both vaults must be CLI-reachable before starting.
+        if not self._vault_reachable(src_vault):
+            return self._err(f"Source vault unreachable: {src_vault}", "SOURCE_VAULT_UNREACHABLE")
+        if not self._vault_reachable(dst_vault):
+            return self._err(f"Target vault unreachable: {dst_vault}", "TARGET_VAULT_UNREACHABLE")
+
+        # Source must exist and be readable.
+        read_result = self.read_obsidian_note(src_vault, src_path)
+        if not read_result["success"]:
+            return self._err(f"Source note not found: {src_vault}/{src_path}", "SOURCE_NOT_FOUND")
+        content = read_result["payload"]["content"]
+
+        # Target-existence guard — no silent overwrite unless explicitly requested.
+        if not overwrite:
+            existing = self.read_obsidian_note(dst_vault, dst_path)
+            if existing["success"]:
+                return self._err(
+                    f"Target note already exists: {dst_vault}/{dst_path} "
+                    "(pass overwrite=true to replace it)",
+                    "TARGET_EXISTS",
+                )
+
+        # Write to target via the existing note-creation path.
+        write_result = self.create_obsidian_note(dst_vault, dst_path, content)
+        if not write_result["success"]:
+            return self._err(
+                f"Write to target vault failed: {write_result.get('error')}",
+                "TARGET_WRITE_FAILED",
+            )
+
+        # Verify: read back target and compare against source content.
+        verify_result = self.read_obsidian_note(dst_vault, dst_path)
+        if not verify_result["success"] or verify_result["payload"]["content"] != content:
+            return self._err(
+                f"Write verification failed: {dst_vault}/{dst_path} does not match source content",
+                "WRITE_VERIFICATION_FAILED",
+            )
+
+        warnings = self._scan_cross_vault_links(content)
+
+        if not delete_source:
+            return self._ok({
+                "path": src_path,
+                "newPath": dst_path,
+                "sourceVault": src_vault,
+                "targetVault": dst_vault,
+                "operation": operation,
+                "warnings": warnings,
+            })
+
+        # Move only: delete source AFTER the verified write. A failed delete
+        # never loses data (the copy already succeeded) — report MOVE_PARTIAL,
+        # not a hard error, and never retry silently.
+        delete_result = self.manage_obsidian_notes(src_vault, "delete", src_path)
+        if not delete_result["success"]:
+            return {
+                "success": False,
+                "error": (
+                    f"Copy to target succeeded but source cleanup failed: "
+                    f"{delete_result.get('error')}"
+                ),
+                "error_code": "MOVE_PARTIAL",
+                "payload": {
+                    "path": src_path,
+                    "newPath": dst_path,
+                    "sourceVault": src_vault,
+                    "targetVault": dst_vault,
+                    "operation": operation,
+                    "warnings": warnings,
+                    "targetWriteSucceeded": True,
+                    "sourceDeleteFailed": True,
+                },
+            }
+
+        return self._ok({
+            "path": src_path,
+            "newPath": dst_path,
+            "sourceVault": src_vault,
+            "targetVault": dst_vault,
+            "operation": operation,
+            "warnings": warnings,
+        })
 
     # ─── Tool 9: manage_obsidian_folders ─────────────────────────────────────
 

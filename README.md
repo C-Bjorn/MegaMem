@@ -99,7 +99,7 @@ All 23 tools are available to Claude Desktop and any MCP-compatible client.
 | `explore_vault_folders`     | Explore vault folder structure (tree/flat/paths output)                             |
 | `create_note_with_template` | Create a note using a Templater template with intelligent routing                   |
 | `manage_obsidian_folders`   | Create, rename, or delete vault folders                                             |
-| `manage_obsidian_notes`     | Delete or rename/move notes (cross-folder moves supported)                          |
+| `manage_obsidian_notes`     | Delete, rename/move, copy, or cross-vault copy/move notes (`copy_to_vault`/`move_to_vault`) |
 | `manage_obsidian_base`      | Manage Obsidian Bases `.base` files — operations: `list`, `views`, `query`, `create` |
 | `sync_obsidian_note`        | Sync a specific vault note to the graph on demand                                   |
 
