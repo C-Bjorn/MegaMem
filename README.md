@@ -97,7 +97,7 @@ All 23 tools are available to Claude Desktop and any MCP-compatible client.
 | `create_obsidian_note`      | Create a new note at a specified path                                               |
 | `list_obsidian_vaults`      | List all registered Obsidian vaults                                                 |
 | `explore_vault_folders`     | Explore vault folder structure (tree/flat/paths output)                             |
-| `create_note_with_template` | Create a note using a Templater template with intelligent routing                   |
+| `create_note_with_template` | Create a note from a template with intelligent routing — native rendering engine (no Templater required) when `templateSources` is configured, with cross-vault resolution and registry-aware candidate matching |
 | `manage_obsidian_folders`   | Create, rename, or delete vault folders                                             |
 | `manage_obsidian_notes`     | Delete, rename/move, copy, or cross-vault copy/move notes (`copy_to_vault`/`move_to_vault`) |
 | `manage_obsidian_base`      | Manage Obsidian Bases `.base` files — operations: `list`, `views`, `query`, `create` |
@@ -249,6 +249,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 ### Shipped ✅
 
+- **Native Template Engine** — `create_note_with_template` resolves templates from an ordered list of configured source vaults/folders (personal + company precedence) and renders the honest `<% %>` subset natively — no Templater dependency required in the target vault; works headless for agent/client vaults. Registry-aware candidate matching returns a ranked, enriched `candidates` list (with `whenToUse`/`category`) when no confident match exists, discovered via filter-introspection against `.base` files rather than a fixed folder-adjacency convention. Templater interop guard auto-manages the "ignore folders on creation" list to prevent template-syntax corruption. CLI transport only; WebSocket path unaffected _(v1.7.5)_
 - **OpenRouter Embedding Models** — Model Library → Embedding Models now fetches live catalog from `/api/v1/embeddings/models` (25 embedded seeds available without API key); Multimodal/Free/ZDR filter bar; Python bridge supports `embedder_provider: openrouter` _(v1.6.9)_
 - **Template Scaffold Return** — `create_note_with_template` returns `content` + `instructions` in response; 2-call workflow (create → update, no read needed) _(v1.6.9)_
 - **Analytics: Embed Cost + Timeline Toggles** — Embed cost tracked per sync (content_length/4 × embedder pricing); Embed Cost column + Embed Model in Synced Notes detail; Sync Timeline right-axis toggle: Entities | Edges | LLM Cost _(v1.6.9)_

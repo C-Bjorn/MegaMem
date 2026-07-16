@@ -297,7 +297,28 @@ Explore folder structure in an Obsidian vault (query by natural language or path
 
 ### `create_note_with_template`
 
-Create a new note using a templater template (fuzzy-match) in the vault.
+Create a new note using a template (fuzzy-matched) in the vault.
+
+**Day77.01 Native Template Engine (CLI transport only, `useCliFileTools: true`):**
+When `templateSources` is configured in plugin settings, this tool resolves
+`request_type` against an ordered list of template sources — each
+`{vaultId, folder, label, registry}` — regardless of which vault the sources
+live in vs. the vault the new note is written to (`vault_id` param). Renders
+the supported `<% %>` construct subset natively, without requiring Templater
+to be installed in the target vault. First-match-wins across sources in list
+order; the optional `template_source` param (label or index) pins resolution
+to one source for a single call. Registry mode (auto-detected via a sibling
+`Template-Registry` folder, or configured explicitly) enriches the response
+with `whenToUse`/`category` when available; filename mode (the baseline,
+registry-less) omits that enrichment. No confident match returns a structured
+`candidates` list instead of guessing or erroring. Unsupported `<% %>`
+constructs fall back to legacy Templater-in-target-vault rendering when
+Templater is installed there and the template exists locally; otherwise the
+call fails hard, naming the exact unsupported construct.
+When `templateSources` is empty/unset (default for existing installs), this
+tool behaves exactly as it did before Day77.01 — no behavior change.
+**WebSocket transport (`useCliFileTools: false`) always uses the legacy
+Templater-in-target-vault path** — the native engine is CLI-path only.
 
 INTELLIGENT ROUTING:
 - TPL Project: Create in given project folder (ie. 03_Projects)/ with BRAND-ProjectName folder structure
@@ -305,13 +326,15 @@ INTELLIGENT ROUTING:
 - Entity templates: Auto-route to 04_Entities/[type]/ folders
 - Parse natural language: "create project for X called Y" or "create planning doc for Z"
 
-SERVER-SIDE FOLDER RESOLUTION (when `target_folder` is omitted):
-1. **Templater mapping** — checks `folder_templates` in Templater plugin settings; fuzzy-matches template basename
-2. **Periodic Notes** — matches template name against Periodic Notes config; calculates date-expanded folder path
-3. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
-4. **Vault root** — final fallback if no mapping and no inboxFolder configured
+FOLDER RESOLUTION PRECEDENCE (when `target_folder` is omitted), highest first:
+1. **In-template `tp.file.move("folder")`** — native engine only, parsed from the template body itself
+2. **Registry default folder** — native engine, registry mode only (if the matched registry entry specifies one)
+3. **Templater `folder_templates` mapping** — fuzzy-matches template basename against Templater plugin settings
+4. **Periodic Notes** — matches template name against Periodic Notes config; calculates date-expanded folder path
+5. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
+6. **Vault root** — final fallback if nothing else matched
 
-DUAL-FOLDER TEMPLATE DISCOVERY:
+DUAL-FOLDER TEMPLATE DISCOVERY (legacy Templater path):
 - Template list is built from both `templates_folder` (personal) and `company_templates_folder` (company) in Templater settings
 - Company templates listed first; same-name templates deduped (company wins)
 - If `company_templates_folder` is not configured, behaves identically to previous behavior
@@ -326,11 +349,12 @@ WORKFLOW:
 
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
-| `request_type` | `string` | Templater request type (informational) | Yes | |
+| `request_type` | `string` | Template name to use (fuzzy-matched) | Yes | |
 | `file_name` | `string` | Filename to create (required) | Yes | |
 | `content` | `string` | Optional content to append after template processing | No | |
 | `target_folder` | `string` | Target folder path in the vault (optional) | No | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
+| `template_source` | `string` | Native engine only: label or index of a configured template source to pin resolution to for this call, overriding precedence | No | |
 
 ### `manage_obsidian_folders`
 

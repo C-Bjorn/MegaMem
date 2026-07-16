@@ -1084,7 +1084,9 @@ Explore folder structure in an Obsidian vault (query by natural language or path
 
 ### `create_note_with_template`
 
-Create a new note using a templater template (fuzzy-match) in the vault.
+Create a new note from a template (fuzzy-matched by `request_type`) in the vault.
+
+**Native template engine (Day77.01, CLI transport only — `useCliFileTools: true`):** when `templateSources` is configured in plugin settings, this tool resolves `request_type` against an ordered list of template sources (e.g. personal + company vault/folder pairs) and renders the template natively — Templater is not required in the target vault. Registry mode (a Template-Registry Base or plain-file folder, auto-detected or configured explicitly) enriches the response with `whenToUse`/`category`; filename-only resolution is the baseline otherwise. No confident match returns a structured `candidates` list (ranked by relevance, enriched where available) instead of guessing or erroring. Falls back to legacy Templater-in-target-vault rendering for unsupported `<% %>` constructs when Templater is installed and the template exists locally, or entirely when `templateSources` is empty/unset (default for existing installs — no behavior change).
 
 INTELLIGENT ROUTING:
 
@@ -1093,11 +1095,14 @@ INTELLIGENT ROUTING:
 - Entity templates: Auto-route to 04_Entities/[type]/ folders
 - Parse natural language: "create project for X called Y" or "create planning doc for Z"
 
-SERVER-SIDE FOLDER RESOLUTION (when `target_folder` is omitted):
+SERVER-SIDE FOLDER RESOLUTION (when `target_folder` is omitted), highest precedence first:
 
-1. **Templater mapping** — checks `folder_templates` in Templater plugin settings; fuzzy-matches template basename
-2. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
-3. **Vault root** — final fallback if no mapping and no inboxFolder configured
+1. **In-template `tp.file.move`** — parsed from the template body itself (native engine only)
+2. **Registry default folder** — from the matched Template-Registry entry, when registry mode is active
+3. **Templater mapping** — checks `folder_templates` in Templater plugin settings; fuzzy-matches template basename
+4. **Periodic Notes config** — for daily/weekly/monthly/quarterly/yearly note templates
+5. **MegaMem inboxFolder** — falls back to `mcpTools.defaults.inboxFolder` from plugin settings (e.g. `01_Inbox`)
+6. **Vault root** — final fallback if no mapping and no inboxFolder configured
 
 WORKFLOW:
 
@@ -1108,13 +1113,14 @@ WORKFLOW:
 
 **Parameters:**
 
-| Name            | Type     | Description                                          | Required | Default |
-| --------------- | -------- | ---------------------------------------------------- | -------- | ------- |
-| `request_type`  | `string` | Templater request type (informational)               | Yes      |         |
-| `file_name`     | `string` | Filename to create (required)                        | Yes      |         |
-| `content`       | `string` | Optional content to append after template processing | No       |         |
-| `target_folder` | `string` | Target folder path in the vault (optional)           | No       |         |
-| `vault_id`      | `string` | Vault ID (optional)                                  | No       |         |
+| Name             | Type     | Description                                                                                                                            | Required | Default |
+| ---------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| `request_type`   | `string` | Template name — fuzzy matched (exact → prefix → substring → structured candidate list)                                                | Yes      |         |
+| `file_name`      | `string` | Filename to create (required)                                                                                                          | Yes      |         |
+| `content`        | `string` | Optional content to append after template processing                                                                                   | No       |         |
+| `target_folder`  | `string` | Target folder path in the vault (optional)                                                                                              | No       |         |
+| `vault_id`       | `string` | Vault ID (optional) — the target vault the note is written into, which may differ from where the template source lives                | No       |         |
+| `template_source`| `string` | Native engine only: label or index of a configured template source to pin resolution to for this call, overriding source precedence   | No       |         |
 
 ### `manage_obsidian_folders`
 

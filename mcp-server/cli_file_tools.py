@@ -30,16 +30,38 @@ class CLIFileTools:
     - Periodic Notes folder paths derived from plugin config on disk or via eval
     """
 
-    def __init__(self, cli: ObsidianCLI, default_vault: Optional[str] = None):
+    def __init__(
+        self,
+        cli: ObsidianCLI,
+        default_vault: Optional[str] = None,
+        template_sources: Optional[List[Dict[str, Any]]] = None,
+    ):
         """
         Args:
             cli: ObsidianCLI instance with binary path set
             default_vault: Default vault name to use when vault_id=None.
                            Populated from vault registry on startup.
+            template_sources: Day77.01 native template engine — ordered list of
+                           {vault_id, folder, label, registry} configured in
+                           plugin settings (templateSources). Empty/None keeps
+                           create_note_with_template on the frozen legacy path.
         """
         self.cli = cli
         self._default_vault = default_vault
         self._vault_paths: Dict[str, str] = {}  # name → filesystem path (for Periodic Notes config)
+        self._template_sources = template_sources or []
+
+    def update_template_sources(self, template_sources: Optional[List[Dict[str, Any]]]) -> None:
+        """Update configured template sources at runtime (Task 3b
+        follow-up #3, Day77.01) — single entry point for any future
+        settings-reload path that updates sources on this already-running
+        instance instead of via a full process restart. Always invalidates
+        the underlying ObsidianCLI's registry-discovery cache so a stale
+        resolved (or previously-missing) Base path can't outlive the
+        config that produced it.
+        """
+        self._template_sources = template_sources or []
+        self.cli.invalidate_registry_cache()
 
     @classmethod
     def from_detected_binary(cls, default_vault: Optional[str] = None) -> "CLIFileTools":
@@ -189,10 +211,34 @@ class CLIFileTools:
         content: str = "",
         target_folder: str = "",
         vault_id: Optional[str] = None,
+        template_source: Optional[Any] = None,
     ) -> Dict[str, Any]:
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
+
+        # Day77.01: native multi-source engine takes over folder/template
+        # resolution entirely when template_sources is configured — skip the
+        # legacy Periodic-Notes-mapping pre-resolution below in that case,
+        # since the native engine's own precedence ladder (Architecture Notes)
+        # supersedes it and re-deriving target_folder here would just be
+        # overridden anyway.
+        if self._template_sources:
+            # A source's empty vault_id means "wherever these settings live"
+            # (the home vault this MCP instance was configured against), NOT
+            # the vault this particular call is writing to — otherwise
+            # cross-vault writes (the whole point of this feature) would look
+            # for templates inside the destination vault and find nothing.
+            home_vault = self._default_vault or vault
+            resolved_sources = [
+                {**source, "vault_id": source.get("vault_id") or home_vault}
+                for source in self._template_sources
+            ]
+            return await asyncio.to_thread(
+                self.cli.create_note_with_template,
+                vault, request_type, file_name, content, target_folder,
+                resolved_sources, template_source,
+            )
 
         # Resolve target_folder from Periodic Notes config if not provided
         resolved_folder = target_folder

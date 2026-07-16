@@ -17,7 +17,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime
 from typing import Any, Optional
+
+from template_matcher import TemplateCandidate, rank_candidates, resolve_across_sources
+from template_renderer import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +134,28 @@ class ObsidianCLI:
 
     def __init__(self, binary: str):
         self.binary = binary
+        # Task 3b follow-up (Day77.01): per-(vault, registry_folder) cache
+        # for filter-introspection registry Base discovery — see
+        # _discover_registry_base(). Lives for this instance's lifetime;
+        # most settings changes naturally use a different registry_folder
+        # key so stale entries are simply never looked up again, but a
+        # config change that revisits a previously-seen key (e.g. toggling
+        # a custom registry path off then back on) must not read a stale
+        # resolution — call invalidate_registry_cache() whenever
+        # template-source settings are updated without a full process
+        # restart (Task 3b follow-up #3).
+        self._registry_base_cache: dict = {}
+
+    def invalidate_registry_cache(self) -> None:
+        """Clear the registry-Base discovery cache — call whenever
+        template-source settings change at runtime (Task 3b follow-up #3,
+        Day77.01), so a stale resolved (or previously-missing) Base path
+        can never outlive the config that produced it. A full process
+        restart already gets this for free via a fresh ObsidianCLI
+        instance; this exists for any settings-reload path that updates
+        template sources on a long-lived instance instead.
+        """
+        self._registry_base_cache.clear()
 
     @classmethod
     def from_detected_binary(cls) -> "ObsidianCLI":
@@ -775,7 +801,744 @@ class ObsidianCLI:
 
     # ─── Tool 7: create_note_with_template ───────────────────────────────────
 
+    # ─── Day77.01: Native Template Engine — Cross-Vault Template Resolution ──
+    #
+    # create_note_with_template dispatches to the native multi-source engine
+    # when `template_sources` is configured (Task 1 settings), else falls back
+    # unmodified to the pre-existing single-vault Templater-eval path below
+    # (_create_note_with_template_legacy) — guaranteeing zero regression for
+    # existing single-vault CLI users who haven't opened the new settings pane.
+
     def create_note_with_template(
+        self,
+        vault: str,
+        request_type: str,
+        file_name: str,
+        content: str = "",
+        target_folder: str = "",
+        template_sources: Optional[list] = None,
+        template_source_override: Optional[Any] = None,
+    ) -> dict:
+        """
+        Resolve request_type against configured template_sources (ordered
+        personal/company sources with precedence) and render natively —
+        works with or without Templater installed in the target vault.
+
+        template_sources: [{vault_id, folder, label, registry}, ...] — registry
+          is "auto-detect" | "<explicit folder path>" | "none". Falls back to
+          the legacy single-vault Templater path when omitted/empty.
+        template_source_override: label (str) or index (int) pinning resolution
+          to one source for this call only.
+        """
+        if not template_sources:
+            return self._create_note_with_template_legacy(
+                vault, request_type, file_name, content, target_folder
+            )
+
+        override_index = self._resolve_source_override_index(
+            template_sources, template_source_override
+        )
+
+        # Perf: match against cheap filename-only listings first (one
+        # explore_vault_folders call per source) — registry enrichment is
+        # deferred to the single winning candidate below. Reading every
+        # registry .md file up front for every call took 60-80s across two
+        # sources (confirmed live, test-vault, 2026-07-16) and doesn't scale.
+        per_source_candidates: list[list[TemplateCandidate]] = [
+            self._list_source_filenames(vault, source, i)
+            for i, source in enumerate(template_sources)
+        ]
+
+        match_result = resolve_across_sources(request_type, per_source_candidates, override_index)
+
+        if not match_result["confident"]:
+            # Task 3b (Day77.01 Rev 4): the registry exists precisely for
+            # this moment — the caller doesn't know which template to use,
+            # so the candidate list must carry when_to_use/category and
+            # must not let one source's listing volume crowd out the
+            # others. Enrich every merged candidate (one query_base call
+            # per registry-mode source, never per-candidate) and rank by
+            # relevance to request_type before capping — alphabetical
+            # source-listing order previously masqueraded as relevance.
+            enriched = self._enrich_candidates_with_registry(
+                match_result["candidates"], template_sources, vault
+            )
+            ranked = rank_candidates(request_type, enriched)
+            top_candidates = ranked[:10]
+
+            # Task 3b follow-up #3 (Day77.01): the batch Base-query pass
+            # above only enriches candidates whose exact name appears as a
+            # row in that source's Base — a template can legitimately exist
+            # under the registry folder's plain-file convention without a
+            # matching Base row (mismatched template_name, or the entry
+            # predates the Base). The single-winner path
+            # (_enrich_with_registry) already falls back to a targeted
+            # single-file read for exactly this case; candidate-return must
+            # use that SAME resolution step (single source of truth) for
+            # any finalist still missing when_to_use — bounded to these
+            # <=10 finalists, never the full merged candidate list, so this
+            # cannot reintroduce the original per-registry-file perf bug.
+            for i, c in enumerate(top_candidates):
+                if c.when_to_use is not None:
+                    continue
+                if not (0 <= c.source_index < len(template_sources)):
+                    continue
+                src = template_sources[c.source_index]
+                if (src.get("registry") or "auto-detect").strip() == "none":
+                    continue
+                src_vault = src.get("vault_id") or vault
+                top_candidates[i] = self._enrich_via_sibling_file(c, src, src_vault)
+
+            return self._ok({
+                "requiresSelection": True,
+                "candidates": [c.to_dict() for c in top_candidates],
+                "message": (
+                    f"No confident match for '{request_type}'. "
+                    "Choose from candidates or refine request_type."
+                ),
+            })
+
+        matched = match_result["matched"]
+        source = template_sources[matched.source_index]
+        source_vault = source.get("vault_id") or vault
+        matched = self._enrich_with_registry(matched, source, source_vault)
+
+        read_result = self.read_obsidian_note(source_vault, matched.path)
+        if not read_result["success"]:
+            return self._err(
+                f"Could not read matched template '{matched.path}' from source vault "
+                f"'{source_vault}': {read_result.get('error')}",
+                "TEMPLATE_READ_FAILED",
+            )
+        template_body = read_result["payload"]["content"]
+
+        file_title = file_name[:-3] if file_name.lower().endswith(".md") else file_name
+        render_result = render_template(template_body, file_title=file_title, now=datetime.now())
+
+        if render_result["unsupported"]:
+            if self._templater_available(vault) and self._template_exists_locally(vault, matched.name):
+                logger.warning(
+                    f"[TEMPLATE] Unsupported construct(s) {render_result['unsupported']} in "
+                    f"'{matched.name}' — falling back to legacy Templater in target vault "
+                    "(deprecated path, template exists locally)"
+                )
+                return self._create_note_with_template_legacy(
+                    vault, request_type, file_name, content, target_folder
+                )
+            return self._err(
+                f"Unsupported Templater construct(s) in '{matched.name}': "
+                f"{render_result['unsupported']}. Templater not available in target vault "
+                "(or template not present locally) to fall back to.",
+                "UNSUPPORTED_TEMPLATE_CONSTRUCT",
+            )
+
+        rendered_content = render_result["rendered_content"]
+
+        # Folder precedence (highest first): explicit param > in-template
+        # tp.file.move > registry default folder > Templater folder_templates
+        # settings mapping > Periodic Notes config > MegaMem inboxFolder.
+        resolved_folder = (
+            target_folder
+            or render_result["target_folder_from_template"]
+            or matched.folder
+            or self._resolve_template_folder(vault, request_type)
+        )
+
+        if resolved_folder:
+            segs = resolved_folder.split("/")
+            for i in range(1, len(segs) + 1):
+                self.manage_obsidian_folders(vault, "create", "/".join(segs[:i]))
+
+        dest_path = f"{resolved_folder.rstrip('/')}/{file_name}" if resolved_folder else file_name
+        dest_path = self._auto_md(dest_path)
+
+        write_result = self.create_obsidian_note(vault, dest_path, rendered_content)
+        if not write_result["success"]:
+            return self._err(
+                f"Failed to write rendered note: {write_result.get('error')}",
+                "TEMPLATE_WRITE_FAILED",
+            )
+
+        if content:
+            self._content_cmd(vault, "append", dest_path, content)
+
+        final_read = self.read_obsidian_note(vault, dest_path)
+        note_content = final_read["payload"]["content"] if final_read["success"] else rendered_content
+
+        response: dict = {
+            "path": dest_path,
+            "message": f"Created from template: {matched.name} (native engine, source: {matched.source_label})",
+            "templateUsed": matched.name,
+            "templateSource": matched.source_label,
+            "content": note_content,
+            "instructions": (
+                "Populate ALL frontmatter fields with correct values. Replace body "
+                "placeholder content matching the template structure. Do NOT add new "
+                "frontmatter fields. Do NOT remove existing fields. Write back with "
+                "update_obsidian_note editing_mode: full_file."
+            ),
+        }
+        if matched.when_to_use is not None:
+            response["whenToUse"] = matched.when_to_use
+        if matched.category is not None:
+            response["category"] = matched.category
+
+        return self._ok(response)
+
+    @staticmethod
+    def _resolve_source_override_index(template_sources: list, override: Optional[Any]) -> Optional[int]:
+        """Resolve the `template_source` per-call override param (label or index)
+        to a source-list index for resolve_across_sources().
+        """
+        if override is None:
+            return None
+        if isinstance(override, int):
+            return override
+        if isinstance(override, str) and override.strip().lstrip("-").isdigit():
+            return int(override)
+        for i, s in enumerate(template_sources):
+            if s.get("label") == override:
+                return i
+        return None
+
+    @staticmethod
+    def _parse_simple_frontmatter(content: str) -> dict:
+        """Minimal scalar-only frontmatter parser for TemplateRegistry entries —
+        no YAML dependency. Only extracts top-level `key: value` scalar lines
+        (template_name, template_path, category, when_to_use, folder); list/nested
+        values (e.g. `tags:`, `properties:`) are intentionally skipped, matching
+        the doc's "no changes to how TemplateRegistry entries are structured."
+        """
+        m = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+        if not m:
+            return {}
+        result: dict = {}
+        for line in m.group(1).split("\n"):
+            sm = re.match(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$", line)
+            if not sm:
+                continue
+            key, val = sm.group(1), sm.group(2).strip()
+            if not val:
+                continue  # list/nested value (e.g. "tags:") — skip
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                val = val[1:-1]
+            result[key] = val
+        return result
+
+    def _auto_detect_registry_folder(self, vault: str, templates_folder: str) -> Optional[str]:
+        """Look for a sibling 'Template-Registry' folder next to the configured
+        templates folder (matches the corpus convention: 06_Resources/Templates
+        + 06_Resources/Template-Registry). Returns the folder path if found and
+        non-empty, else None — caller falls back to filename mode.
+        """
+        parent = templates_folder.rsplit("/", 1)[0] if "/" in templates_folder else ""
+        candidate = f"{parent}/Template-Registry" if parent else "Template-Registry"
+        result = self.explore_vault_folders(vault, candidate, include_files=True, extension_filter=["md"])
+        if result.get("success") and result.get("files"):
+            return candidate
+        return None
+
+    def _list_source_filenames(
+        self, target_vault: str, source: dict, source_index: int
+    ) -> list[TemplateCandidate]:
+        """Cheap filename-only candidate listing for one configured template
+        source — a single explore_vault_folders call, no registry reads.
+        Matching happens against this list; registry enrichment (when
+        configured) is applied only to the single winning candidate via
+        _enrich_with_registry() — reading every registry file up front for
+        every call took 60-80s across two sources (confirmed live,
+        test-vault, 2026-07-16) and doesn't scale.
+        """
+        source_vault = source.get("vault_id") or target_vault
+        folder = source.get("folder", "") or ""
+        label = source.get("label") or source_vault
+
+        listing = self.explore_vault_folders(source_vault, folder, include_files=True, extension_filter=["md"])
+        files = listing.get("files", []) if listing.get("success") else []
+        return [
+            TemplateCandidate(
+                name=f["name"][:-3] if f["name"].lower().endswith(".md") else f["name"],
+                source_label=label,
+                source_index=source_index,
+                path=f["path"],
+            )
+            for f in files
+        ]
+
+    @staticmethod
+    def _candidate_registry_folder(registry_setting: str, templates_folder: str) -> Optional[str]:
+        """Best-guess registry folder path used only as a hint/cache-key for
+        Base discovery (_discover_registry_base) — deliberately NOT
+        existence-checked, unlike _auto_detect_registry_folder (which backs
+        the sibling-file-read fallback and must confirm real files exist).
+        A Base file can legitimately scope to a registry folder that lives
+        anywhere in the vault, not just adjacent to the templates folder.
+        """
+        if registry_setting in ("none",):
+            return None
+        if registry_setting.lower().endswith(".base"):
+            return None
+        if registry_setting == "auto-detect":
+            parent = templates_folder.rsplit("/", 1)[0] if "/" in templates_folder else ""
+            return f"{parent}/Template-Registry" if parent else "Template-Registry"
+        return registry_setting
+
+    def _discover_registry_base(
+        self, vault: str, registry_folder: str, source_label: Optional[str] = None
+    ) -> Optional[str]:
+        """Filter-introspection discovery of the .base file that scopes to
+        `registry_folder` — replaces the old <parent-of-templates-folder>/
+        Bases/TemplateRegistry.base path heuristic (Task 3b follow-up,
+        Day77.01), which assumed a fixed folder-adjacency convention that
+        doesn't hold for every vault layout. Enumerates the vault's .base
+        files once per (vault, registry_folder) pair and caches a
+        successful result for this instance's lifetime:
+
+          1. Name narrows the field: any base file whose NAME contains
+             "TemplateRegistry" (case-insensitive) is a *candidate*, not an
+             automatic winner — a vault can carry more than one base named
+             this way (one per source, e.g. Personal + CompanyRelay), so a
+             bare name match is never decisive on its own (Task 3b
+             follow-up #2, Day77.01: production repro where a top-level-
+             folder-overlap tiebreak between two same-named bases was a
+             zero-zero tie and handed the wrong base to a source).
+          2. Filter text decides: each name-matched candidate's raw content
+             is read and substring-matched against `registry_folder` — the
+             filters block references the folder as a literal string (e.g.
+             `file.folder == "06_Resources/Template-Registry"`); we
+             deliberately do NOT parse the filter expression, just check
+             the folder path string appears somewhere in the file. Exactly
+             one filter-text match among the name candidates wins outright.
+             More than one match falls back to top-level-folder overlap
+             with `registry_folder`, then first-with-warning. Zero matches
+             among the name candidates means name alone isn't decisive —
+             fall through to step 3.
+          3. Full filter-text scan: every remaining (non-name-matched, or
+             all bases if step 1 found no name candidates at all) base is
+             read and substring-matched the same way. First match wins;
+             multiple matches log a warning and use the first.
+
+        Every resolution path logs its decision (source label, winning
+        base, and why) so this class of bug is diagnosable from output.
+
+        Returns None (not cached — a miss should be retried on next call in
+        case a Base is added later) if nothing is found, so callers fall
+        back to the sibling-file read or filename-mode gracefully.
+        """
+        cache_key = (vault, registry_folder)
+        cached = self._registry_base_cache.get(cache_key)
+        if cached:
+            return cached
+
+        label = source_label or vault
+        list_result = self.list_bases(vault)
+        if not list_result.get("success"):
+            logger.info(
+                f"[TEMPLATE] Registry discovery for source '{label}': bases enumeration "
+                f"failed in vault '{vault}'"
+            )
+            return None
+        bases = list_result["payload"].get("bases", [])
+        if not bases:
+            logger.info(
+                f"[TEMPLATE] Registry discovery for source '{label}': no .base files found "
+                f"in vault '{vault}'"
+            )
+            return None
+
+        name_matches = [b for b in bases if "templateregistry" in b.lower()]
+        checked: set[str] = set()
+
+        if name_matches:
+            # Name narrows the field to candidates; filter text (the literal
+            # registry-folder string in the filters block) decides which one
+            # actually scopes to this source's registry — a name match alone
+            # is never accepted without this check.
+            passing = []
+            for base_path in name_matches:
+                checked.add(base_path)
+                read = self.read_obsidian_note(vault, base_path)
+                if read.get("success") and registry_folder in read["payload"]["content"]:
+                    passing.append(base_path)
+
+            if len(passing) == 1:
+                resolved = passing[0]
+                logger.info(
+                    f"[TEMPLATE] Registry discovery for source '{label}': resolved "
+                    f"'{resolved}' (name fast-path, confirmed by filter text referencing "
+                    f"'{registry_folder}')"
+                )
+                self._registry_base_cache[cache_key] = resolved
+                return resolved
+            if len(passing) > 1:
+                top_level = registry_folder.split("/", 1)[0] if registry_folder else None
+                scoped = [b for b in passing if top_level and b.split("/", 1)[0] == top_level]
+                if scoped:
+                    resolved = scoped[0]
+                    logger.info(
+                        f"[TEMPLATE] Registry discovery for source '{label}': resolved "
+                        f"'{resolved}' (name fast-path, {len(passing)} filter-text matches, "
+                        f"disambiguated by top-level folder overlap with '{registry_folder}')"
+                    )
+                else:
+                    resolved = passing[0]
+                    logger.warning(
+                        f"[TEMPLATE] Registry discovery for source '{label}': {len(passing)} "
+                        f"TemplateRegistry-named bases both reference registry folder "
+                        f"'{registry_folder}' in filter text, none sharing a top-level "
+                        f"folder with it: {passing} — using the first ('{resolved}')"
+                    )
+                self._registry_base_cache[cache_key] = resolved
+                return resolved
+            # No name-match's filter text referenced this registry_folder —
+            # name alone is not decisive. Fall through to the full
+            # filter-text scan below (bases already checked here are
+            # skipped, not re-read).
+            logger.info(
+                f"[TEMPLATE] Registry discovery for source '{label}': {len(name_matches)} "
+                f"TemplateRegistry-named base(s) found but none reference registry folder "
+                f"'{registry_folder}' in filter text — falling through to full filter-text scan"
+            )
+
+        filter_matches = []
+        for base_path in bases:
+            if base_path in checked:
+                continue
+            read = self.read_obsidian_note(vault, base_path)
+            if read.get("success") and registry_folder in read["payload"]["content"]:
+                filter_matches.append(base_path)
+
+        if not filter_matches:
+            logger.info(
+                f"[TEMPLATE] Registry discovery for source '{label}': no .base file "
+                f"references registry folder '{registry_folder}' in vault '{vault}'"
+            )
+            return None
+        if len(filter_matches) > 1:
+            logger.warning(
+                f"[TEMPLATE] Registry discovery for source '{label}': multiple .base files "
+                f"reference registry folder '{registry_folder}' in vault '{vault}': "
+                f"{filter_matches} — using the first"
+            )
+        resolved = filter_matches[0]
+        logger.info(
+            f"[TEMPLATE] Registry discovery for source '{label}': resolved '{resolved}' "
+            f"(filter-text scan, no decisive name match)"
+        )
+        self._registry_base_cache[cache_key] = resolved
+        return resolved
+
+    def _get_registry_rows(self, vault: str, source: dict) -> Optional[list]:
+        """Resolve (via filter-introspection discovery, cached) and query the
+        registry Base for `source`. An explicit `registry` setting ending in
+        `.base` is used directly with no discovery involved (static config,
+        not a discovered guess). Retries discovery once, invalidating the
+        cache first, if a cached path has gone missing (e.g. the Base file
+        was renamed/deleted) — satisfies "re-resolve if the cached path goes
+        missing" without a proactive existence check on every call.
+
+        Returns the parsed row list, or None if no Base applies or every
+        attempt fails — callers fall back to sibling-file reads or
+        filename-mode, registry enrichment is always an enhancement.
+        """
+        label = source.get("label") or vault
+        registry_setting = (source.get("registry") or "auto-detect").strip()
+        if registry_setting == "none":
+            return None
+
+        if registry_setting != "auto-detect" and registry_setting.lower().endswith(".base"):
+            result = self.query_base(vault, path=registry_setting, format="json")
+            if not result.get("success"):
+                return None
+            rows = result["payload"].get("results")
+            return rows if isinstance(rows, list) else None
+
+        # A hint string only — used as the discovery cache key and as the
+        # substring searched for in Base filter text. Deliberately does NOT
+        # require the folder to physically exist (unlike
+        # _auto_detect_registry_folder, which is existence-checked and used
+        # only for the sibling-file-read fallback below in
+        # _enrich_with_registry) — a Base can legitimately scope to a
+        # registry folder that lives anywhere in the vault, adjacent or not.
+        templates_folder = source.get("folder", "") or ""
+        registry_folder = self._candidate_registry_folder(registry_setting, templates_folder)
+        if not registry_folder:
+            # Diagnoses the "hint itself is empty/wrong" failure mode
+            # (Task 3b follow-up #2, Day77.01) instead of silently
+            # returning a bare, unenriched candidate with no trace of why.
+            logger.warning(
+                f"[TEMPLATE] Registry hint for source '{label}' resolved empty "
+                f"(registry_setting='{registry_setting}', templates_folder="
+                f"'{templates_folder}') — registry enrichment skipped for this source"
+            )
+            return None
+        logger.debug(
+            f"[TEMPLATE] Registry hint for source '{label}': '{registry_folder}' "
+            f"(registry_setting='{registry_setting}')"
+        )
+
+        cache_key = (vault, registry_folder)
+        base_path = self._discover_registry_base(vault, registry_folder, source_label=label)
+        if not base_path:
+            return None
+
+        result = self.query_base(vault, path=base_path, format="json")
+        if not result.get("success"):
+            self._registry_base_cache.pop(cache_key, None)
+            base_path = self._discover_registry_base(vault, registry_folder, source_label=label)
+            if not base_path:
+                return None
+            result = self.query_base(vault, path=base_path, format="json")
+            if not result.get("success"):
+                return None
+
+        rows = result["payload"].get("results")
+        return rows if isinstance(rows, list) else None
+
+    def _enrich_via_sibling_file(
+        self, candidate: TemplateCandidate, source: dict, source_vault: str
+    ) -> TemplateCandidate:
+        """Single-file registry-entry fallback — the *sole* implementation
+        of this resolution step, shared by both the single-winner path
+        (_enrich_with_registry) and the candidate-return path's bounded
+        top-N pass (Task 3b follow-up #3, Day77.01: candidate-return was
+        previously missing this fallback entirely, so a source whose Base
+        rows didn't cover every filename enriched fine on the winner path
+        but came back bare on candidate-return for the exact same source —
+        one function, one behavior, called from both places).
+
+        Used when the Base-query path (_get_registry_rows) has no row for
+        this specific candidate name — legitimately possible even when the
+        Base itself was discovered correctly (a template registered under
+        the registry folder's plain-file convention but not yet added as a
+        Base row, or a template_name mismatch). Reads exactly one targeted
+        <registry_folder>/<candidate.name>.md file. Returns `candidate`
+        unchanged if no registry folder applies or the read/parse misses —
+        registry enrichment is always an enhancement, never a requirement.
+        """
+        registry_setting = (source.get("registry") or "auto-detect").strip()
+        folder = source.get("folder", "") or ""
+        if registry_setting == "auto-detect":
+            registry_folder = self._auto_detect_registry_folder(source_vault, folder)
+        elif registry_setting.lower().endswith(".base"):
+            registry_folder = None  # explicit .base has no folder-fallback concept
+        else:
+            registry_folder = registry_setting
+        if not registry_folder:
+            return candidate
+
+        guess_path = f"{registry_folder.rstrip('/')}/{candidate.name}.md"
+        read = self.read_obsidian_note(source_vault, guess_path)
+        if not read.get("success"):
+            return candidate
+
+        fm = self._parse_simple_frontmatter(read["payload"]["content"])
+        if not fm:
+            return candidate
+
+        return TemplateCandidate(
+            name=fm.get("template_name") or candidate.name,
+            source_label=candidate.source_label,
+            source_index=candidate.source_index,
+            path=candidate.path,
+            when_to_use=fm.get("when_to_use"),
+            category=fm.get("category"),
+            folder=fm.get("folder") or candidate.folder,
+        )
+
+    def _enrich_with_registry(
+        self, candidate: TemplateCandidate, source: dict, source_vault: str
+    ) -> TemplateCandidate:
+        """Enrich the already-matched candidate with registry metadata
+        (when_to_use, category) for the single winning template only —
+        never scans the whole registry for every call. Registry Base
+        lookup goes through _get_registry_rows() (filter-introspection
+        discovery, cached); falls back to _enrich_via_sibling_file() (a
+        single targeted registry-file read) when no Base row matches.
+        Returns `candidate` unchanged if registry is disabled or both
+        lookups miss — registry is an enhancement, never a requirement.
+        """
+        registry_setting = (source.get("registry") or "auto-detect").strip()
+        if registry_setting == "none":
+            return candidate
+
+        rows = self._get_registry_rows(source_vault, source)
+        if rows:
+            row = next(
+                (r for r in rows if isinstance(r, dict) and r.get("template_name") == candidate.name),
+                None,
+            )
+            if row:
+                return TemplateCandidate(
+                    name=row.get("template_name") or candidate.name,
+                    source_label=candidate.source_label,
+                    source_index=candidate.source_index,
+                    path=candidate.path,
+                    when_to_use=row.get("when_to_use"),
+                    category=row.get("category"),
+                    folder=row.get("folder") or candidate.folder,
+                )
+
+        return self._enrich_via_sibling_file(candidate, source, source_vault)
+
+    def _enrich_candidates_with_registry(
+        self, candidates: list, template_sources: list, target_vault: str
+    ) -> list:
+        """Task 3b (Day77.01): batch registry enrichment for the
+        candidate-return (no-confident-match) path — one Base query per
+        registry-mode source represented in `candidates` (via
+        _get_registry_rows(), same filter-introspection discovery + cache
+        as the single-winner path), covering every one of that source's
+        candidates in a single round-trip. Never a per-candidate file read
+        (that would reintroduce the original perf bug, just at
+        candidate-count scale instead of registry-file-count scale).
+        Sources with registry: "none", or whose Base lookup fails/misses,
+        are left as name-only candidates — this is a pure enhancement,
+        never required for the candidate-return response to be useful.
+
+        Mutates and returns `candidates` in place (TemplateCandidate is a
+        plain, non-frozen dataclass) — matches the mutate-in-place style
+        already used for the single-winner path this mirrors.
+        """
+        by_source: dict = {}
+        for c in candidates:
+            by_source.setdefault(c.source_index, []).append(c)
+
+        for source_index, group in by_source.items():
+            if not (0 <= source_index < len(template_sources)):
+                continue
+            source = template_sources[source_index]
+            source_vault = source.get("vault_id") or target_vault
+
+            rows = self._get_registry_rows(source_vault, source)
+            if not rows:
+                continue
+            rows_by_name = {
+                r.get("template_name"): r for r in rows if isinstance(r, dict) and r.get("template_name")
+            }
+            for c in group:
+                row = rows_by_name.get(c.name)
+                if row:
+                    c.when_to_use = row.get("when_to_use")
+                    c.category = row.get("category")
+                    c.folder = row.get("folder") or c.folder
+
+        return candidates
+
+    def _templater_available(self, vault: str) -> bool:
+        """Check if Templater is installed in `vault` — used only to decide
+        whether the legacy-fallback branch is reachable for unsupported constructs.
+        """
+        js = "(() => !!app.plugins.getPlugin('templater-obsidian'))()"
+        out, code = self._run(vault, "eval", f"code={js}")
+        return not self._is_error(out, code) and out.lstrip("=> ").strip() == "true"
+
+    def _template_exists_locally(self, vault: str, template_name: str) -> bool:
+        """Check if a template with this basename physically exists in `vault` —
+        required before the legacy Templater fallback can run (Templater can
+        only resolve templates present in the vault being written to).
+        """
+        safe_name = template_name.replace("'", "\\'")
+        js = (
+            f"(()=>{{ const rt='{safe_name}'.toLowerCase();"
+            " const all=app.vault.getMarkdownFiles();"
+            " return all.some(f=>f.basename.toLowerCase()===rt); })()"
+        )
+        out, code = self._run(vault, "eval", f"code={js}")
+        return not self._is_error(out, code) and out.lstrip("=> ").strip() == "true"
+
+    # ─── Day77.01 Task 4: Templater Interop Guard ────────────────────────────
+    #
+    # Templater's trigger-on-file-creation processes ANY new file and strips
+    # `<% %>` syntax unless the file lands in its template folder or its
+    # "ignore folders on file creation" list. Confirmed settings keys (read
+    # from a live Templater data.json, 2026-07-16): trigger_on_file_creation
+    # (bool) and ignore_folders_on_creation (list[str]). The settings READ
+    # below reuses the proven eval pattern used throughout this file; the
+    # WRITE + save_settings() persist is a net-new technique — unverified
+    # against a live Obsidian instance. Spike this manually (create a raw
+    # template file in a guarded folder with Templater's trigger active;
+    # confirm syntax survives AND the setting persists across a plugin
+    # reload) before relying on it in production. If the write doesn't
+    # persist, fall back to surfacing manual instructions in settings (Task 1)
+    # instead of auto-writing.
+
+    def get_templater_interop_status(self, vault: str) -> dict:
+        """Read Templater's trigger-on-creation setting + ignore-folders list.
+        ignoreFolders is normalized to a flat list of folder-path strings for
+        callers — Templater's own settings UI stores entries as {folder: string}
+        objects (confirmed live, test-vault data.json, 2026-07-16), so the raw
+        eval result is mapped here rather than returned as-is.
+        """
+        js = (
+            "(()=>{ const p=app.plugins.getPlugin('templater-obsidian');"
+            " if(!p) return JSON.stringify({installed:false});"
+            " const s=p.settings||{};"
+            " const raw=s.ignore_folders_on_creation||[];"
+            " const norm=raw.map(e=>typeof e==='string'?e:(e&&e.folder)||'').filter(Boolean);"
+            " return JSON.stringify({installed:true,"
+            " triggerOnCreation: !!s.trigger_on_file_creation,"
+            " ignoreFolders: norm}); })()"
+        )
+        out, code = self._run(vault, "eval", f"code={js}")
+        if self._is_error(out, code):
+            return {"installed": False, "triggerOnCreation": False, "ignoreFolders": []}
+        raw = out.lstrip("=> ").strip()
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"installed": False, "triggerOnCreation": False, "ignoreFolders": []}
+
+    def ensure_templater_ignore_folder(self, vault: str, folder: str) -> dict:
+        """Add `folder` to Templater's ignore_folders_on_creation list and
+        persist via save_settings(), if not already present. No-op
+        (guarded=False) when Templater isn't installed or
+        trigger_on_file_creation is off — the corruption hazard doesn't exist
+        in that case, so nothing needs guarding.
+
+        Writes the {folder: string} object shape Templater's own settings UI
+        uses (confirmed live, test-vault data.json, 2026-07-16) — a plain
+        string entry persists to disk fine but is invisible to Templater's
+        own ignore-check logic, which reads entry.folder.
+
+        Returns {"guarded": bool, "reason": str, "alreadyPresent": bool}.
+        Called at template-source configuration time (Task 1 settings UI),
+        deliberately before the folder's first file write.
+        """
+        status = self.get_templater_interop_status(vault)
+        if not status.get("installed"):
+            return {"guarded": False, "reason": "templater_not_installed", "alreadyPresent": False}
+        if not status.get("triggerOnCreation"):
+            return {"guarded": False, "reason": "trigger_on_creation_disabled", "alreadyPresent": False}
+        if folder in (status.get("ignoreFolders") or []):
+            return {"guarded": True, "reason": "already_present", "alreadyPresent": True}
+
+        safe_folder = folder.replace("'", "\\'")
+        js = (
+            "(async()=>{ const p=app.plugins.getPlugin('templater-obsidian');"
+            " if(!p) return JSON.stringify({success:false,error:'not_installed'});"
+            " const s=p.settings; const list=s.ignore_folders_on_creation||[];"
+            f" const already=list.some(e=>typeof e==='string'?e==='{safe_folder}':e&&e.folder==='{safe_folder}');"
+            f" if(!already) list.push({{folder:'{safe_folder}'}});"
+            " s.ignore_folders_on_creation=list;"
+            " if(typeof p.saveSettings==='function') await p.saveSettings();"
+            " else if(typeof p.save_settings==='function') await p.save_settings();"
+            " return JSON.stringify({success:true}); })()"
+        )
+        out, code = self._run(vault, "eval", f"code={js}")
+        if self._is_error(out, code):
+            return {"guarded": False, "reason": f"eval_failed: {out}", "alreadyPresent": False}
+        raw = out.lstrip("=> ").strip()
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"guarded": False, "reason": "unparseable_eval_response", "alreadyPresent": False}
+        if not result.get("success"):
+            return {"guarded": False, "reason": result.get("error", "unknown_write_failure"), "alreadyPresent": False}
+        logger.info(f"[TEMPLATE-GUARD] Added '{folder}' to Templater ignore_folders_on_creation in vault '{vault}'")
+        return {"guarded": True, "reason": "added", "alreadyPresent": False}
+
+    def _create_note_with_template_legacy(
         self,
         vault: str,
         request_type: str,
@@ -794,6 +1557,11 @@ class ObsidianCLI:
           2b. Periodic Notes plugin config — match by template basename, expand date format
           3. MegaMem inboxFolder setting
         Folder is pre-created via manage_obsidian_folders (proven CLI pattern) before Templater runs.
+
+        Frozen legacy path (Day77.01): this is the pre-native-engine behavior,
+        preserved unmodified as the fallback for (a) callers with no
+        template_sources configured and (b) unsupported-construct delegation
+        when Templater is available and the template exists locally.
         """
         safe_request = request_type.replace("'", "\\'")
         safe_filename = file_name.replace("'", "\\'")

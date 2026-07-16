@@ -233,11 +233,14 @@ No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as 
 ### `create_note_with_template`
 | Param | Required | Notes |
 |---|---|---|
-| `request_type` | Yes | Template name — fuzzy matched |
+| `request_type` | Yes | Template name — fuzzy matched (exact → prefix → substring → structured candidate list) |
 | `file_name` | Yes | Note title, no `.md` extension |
 | `content` | No | Appended after template renders |
 | `target_folder` | No | Omit to let template routing handle placement |
-| `vault_id` | No | |
+| `vault_id` | No | Target vault to write the note into — may differ from where the template source lives |
+| `template_source` | No | Label or index pinning resolution to one configured template source for this call only, overriding source precedence. CLI mode with `templateSources` configured only. |
+
+**Native template engine (Day77.01, CLI mode only):** resolves against an ordered list of configured `templateSources` (e.g. personal + company vault/folder pairs) and renders the supported `<% %>` subset natively — works with or without Templater installed in the target vault. When a source has a Template-Registry (Base or plain-file convention), the response is enriched with `whenToUse`/`category`; filename-only resolution is the baseline otherwise. No confident match returns a structured `candidates` list (ranked by relevance, enriched with registry metadata where available) instead of guessing or erroring. Falls back to the legacy Templater-in-target-vault path when `templateSources` is empty/unconfigured, or for unsupported `<% %>` constructs when Templater is installed and the template exists locally in the target vault.
 
 ### `search_obsidian_notes`
 | Param | Required | Notes |
@@ -978,19 +981,22 @@ class ObsidianMegaMemMCPServer:
             ),
             Tool(
                 name="create_note_with_template",
-                description=f"""Create Obsidian note from Templater template. Template list in request_type.
+                description=f"""Create an Obsidian note from a template. request_type is fuzzy-matched against configured template sources; the template renders into the target vault (templates need not exist there).
 
-ROUTING: Templater folder_templates → MegaMem inbox → vault root. TPL Project→03_Projects/{{Name}}/; TPL ProjectDoc→project subfolders; entity templates→04_Entities/.
+RESPONSE: on success — rendered note scaffold (`content`), `instructions` for populating it, and `when_to_use`/`category` when a template registry covers the match. If no template matches confidently — `requiresSelection: true` with a `candidates` list (name, source, when_to_use); pick one and call again with its exact name. Do not guess template names when candidates are offered.
 
-WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) update_obsidian_note to fill sections 3) offer remaining""",
+FOLDER ROUTING (highest precedence first): target_folder param > template's own routing > registry default > configured folder mappings > inbox. Omit target_folder unless forcing a location.
+
+WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_note (editing_mode: full_file) following the scaffold structure 3) report the note path.""",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "request_type": {"type": "string", "description": f"Template name to use (fuzzy-matched). {self._template_list_description}"},
                         "file_name": {"type": "string", "description": "Filename to create (required)"},
                         "content": {"type": "string", "description": "Optional content to append after template processing"},
-                        "target_folder": {"type": "string", "description": "Override folder. Most templates self-route via Templater mappings; omit unless forcing a specific location."},
-                        "vault_id": {"type": "string", "description": "Vault ID (optional)"}
+                        "target_folder": {"type": "string", "description": "Override folder. Most templates self-route via Templater mappings or tp.file.move; omit unless forcing a specific location."},
+                        "vault_id": {"type": "string", "description": "Vault ID (optional)"},
+                        "template_source": {"type": "string", "description": "Optional: label or index of a configured template source to pin resolution to for this call, overriding source precedence (CLI mode with templateSources configured only)."}
                     },
                     "required": ["request_type", "file_name"]
                 }
@@ -1963,7 +1969,12 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
                 if cli_binary:
                     logger.info(f"[CLI] useCliFileTools=true — activating CLI backend: {cli_binary}")
                     from obsidian_cli import ObsidianCLI
-                    cli_instance = CLIFileTools(cli=ObsidianCLI(cli_binary))
+                    # Day77.01: native template engine sources, empty list keeps
+                    # create_note_with_template on the frozen legacy Templater path.
+                    _template_sources = obsidian_config.get("templateSources", [])
+                    if _template_sources:
+                        logger.info(f"[TEMPLATE] Native engine active — {len(_template_sources)} configured source(s)")
+                    cli_instance = CLIFileTools(cli=ObsidianCLI(cli_binary), template_sources=_template_sources)
 
                     # Derive default vault name from OBSIDIAN_CONFIG_PATH
                     # e.g. ".../my-vault/.obsidian/plugins/..." → "my-vault"
@@ -2519,15 +2530,22 @@ WORKFLOW: 1) create (response includes `content` scaffold + `instructions`) 2) u
             content = arguments.get("content", "")
             target_folder = arguments.get("target_folder", "")
             vault_id = arguments.get("vault_id", None)
+            template_source = arguments.get("template_source", None)
 
-            # Call the FileTools method
-            result = await self.file_tools.create_note_with_template(
-                request_type=request_type,
-                file_name=file_name,
-                content=content,
-                target_folder=target_folder,
-                vault_id=vault_id
-            )
+            # Call the FileTools method. template_source is a no-op kwarg for
+            # the WebSocket-backed FileTools (frozen legacy path, Day77.01) —
+            # only CLIFileTools consumes it when templateSources is configured.
+            call_kwargs: Dict[str, Any] = {
+                "request_type": request_type,
+                "file_name": file_name,
+                "content": content,
+                "target_folder": target_folder,
+                "vault_id": vault_id,
+            }
+            if template_source is not None and hasattr(self.file_tools, "_template_sources"):
+                call_kwargs["template_source"] = template_source
+
+            result = await self.file_tools.create_note_with_template(**call_kwargs)
 
             return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
         except Exception as e:
