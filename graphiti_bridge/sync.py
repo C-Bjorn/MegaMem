@@ -121,6 +121,7 @@ from .utils import (
 )
 from .models import initialize_global_loader, get_node_types, get_edge_types, get_entity_type_definitions, get_edge_type_definitions, get_edge_type_map, get_graphiti_entity_types, get_graphiti_edge_types, get_graphiti_edge_type_map
 from .openrouter_client import OpenRouterClient, InfrastructureError
+from .ollama_client import OllamaGenericClient, ensure_bounded_ollama_model, DERIVATIVE_STATE_FILENAME
 
 
 async def main():
@@ -836,16 +837,48 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
             if debug and getattr(config, 'llm_small_model', None):
                 logger.debug(
                     "Ollama provider: ignoring llm_small_model for structured JSON reliability")
+
+            # Day78.04b (Issue #20) correction: extra_body.num_ctx is NOT honored by
+            # Ollama's own OpenAI-compat endpoint (live-verified against Ollama 0.32.1 —
+            # see ollama_client.py docstring). Pre-create a bounded-context derivative
+            # model instead — this is the mechanism that actually reduces real Ollama
+            # memory reservation. Soft-fails to the base model (unbounded) on any error
+            # so a broken Ollama /api/create call never blocks a sync.
+            ollama_num_ctx = int(getattr(config, 'ollama_num_ctx', 8192))
+            ollama_llm_model = config.llm_model
+            try:
+                state_dir = getattr(config, 'models_path', None) or getattr(config, 'vault_path', None) or '.'
+                llm_model_for_ollama = await ensure_bounded_ollama_model(
+                    ollama_base_url=ollama_base_url,
+                    base_model=config.llm_model,
+                    num_ctx=ollama_num_ctx,
+                    state_path=Path(state_dir) / DERIVATIVE_STATE_FILENAME,
+                )
+                ollama_llm_model = llm_model_for_ollama
+            except Exception as e:
+                logger.warning(
+                    f"[Day78.04b] Could not create/verify bounded-context Ollama derivative model "
+                    f"for '{config.llm_model}' (num_ctx={ollama_num_ctx}) — falling back to the base "
+                    f"model unbounded. Error: {e}")
+
             llm_config = LLMConfig(
                 api_key="ollama",
-                model=config.llm_model,
+                model=ollama_llm_model,
                 small_model=ollama_small,
                 base_url=ollama_base_url
             )
-            llm_client = OpenAIGenericClient(config=llm_config)
+            # Day78.04 (Issue #20): OllamaGenericClient (local subclass of
+            # OpenAIGenericClient) bounds call timeout, and still passes num_ctx via
+            # extra_body for non-Ollama OpenAI-compat backends that honor it.
+            llm_client = OllamaGenericClient(
+                config=llm_config,
+                num_ctx=ollama_num_ctx,
+                timeout=float(getattr(config, 'timeout', 30)),
+            )
             if debug:
                 logger.info(
-                    f"Ollama LLM client instantiated with model: {config.llm_model}")
+                    f"Ollama LLM client instantiated with model: {ollama_llm_model} "
+                    f"(num_ctx={ollama_num_ctx}, timeout={getattr(config, 'timeout', 30)}s)")
 
             cross_encoder = _make_noop_cross_encoder()
 

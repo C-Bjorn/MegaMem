@@ -13,6 +13,7 @@ import json
 import asyncio
 import argparse
 import contextlib
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import socket
@@ -487,6 +488,9 @@ class ObsidianMegaMemMCPServer:
         self.resource_loading_task = None
         self.ready_event = asyncio.Event()
         self.embedder_healthy = True  # Set False if embedder health check fails at startup
+        # @purpose: Self-healing embedder state @depends: time.monotonic @results: Sticky-False bug fix (Day78.02) — lazy re-check with cooldown instead of permanent-until-restart
+        self._embedder_last_checked = 0.0
+        self._embedder_check_cooldown = 8.0  # seconds between lazy re-checks when unhealthy
         self._template_list_description = "Available templates: scan unavailable — use TPL + type name (e.g. TPL Person, TPL Note, TPL Meeting)"
 
         # @purpose: Episode queuing to prevent race conditions @depends: asyncio.Queue @results: Sequential episode processing per group_id
@@ -1188,9 +1192,9 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
                     })
                 )]
 
-        # @purpose: Gate search/edge tools when embedder is unreachable @depends: embedder_healthy @results: Clear error instead of raw APIConnectionError
+        # @purpose: Gate search/edge tools when embedder is unreachable @depends: _ensure_embedder_healthy @results: Self-healing lazy re-check (Day78.02) instead of sticky-False-until-restart
         _EMBEDDER_REQUIRED = {"search_memory_nodes", "search_memory_facts", "get_entity_edge"}
-        if name in _EMBEDDER_REQUIRED and not self.embedder_healthy:
+        if name in _EMBEDDER_REQUIRED and not await self._ensure_embedder_healthy():
             provider = self.bridge_config.embedder_provider if self.bridge_config else 'ollama'
             if provider == 'ollama':
                 msg = "Embedder unreachable: Ollama is not running (start with: ollama serve)"
@@ -1769,6 +1773,9 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
                 friendly_msg = "Embedder unreachable: Ollama is not running (start with: ollama serve)"
                 logger.error(f"[EMBEDDER ERROR] {friendly_msg}")
                 self.embedder_healthy = False
+                # Reset cooldown clock so the next call's lazy re-check waits a full cooldown
+                # window before re-probing a freshly-confirmed-down embedder (Day78.02)
+                self._embedder_last_checked = time.monotonic()
                 return [types.TextContent(type="text", text=json.dumps({"success": False, "error": friendly_msg}))]
             logger.error(f"MegaMem tool error: {e}", exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({
@@ -2038,6 +2045,86 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
             self.ready_event.set()
             raise
 
+    async def _probe_embedder_health(self, group_id: str) -> bool:
+        """
+        @purpose: Lightweight embedder connectivity probe, reused by startup check and by the
+                  self-healing lazy re-check (Day78.02 sticky-flag fix)
+        @depends: self.megamem_client._search
+        @results: True if embedder reachable (or the failure is a non-connectivity data error),
+                  False only on an actual connection-class failure
+        """
+        try:
+            hc_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+            hc_config.limit = 1
+            # Suppress graphiti-core's internal "Error executing" stderr spam during this probe —
+            # we handle the exception ourselves below
+            import logging as _logging
+            _gcore_logger = _logging.getLogger("graphiti_core")
+            _prev_level = _gcore_logger.level
+            _gcore_logger.setLevel(_logging.CRITICAL)
+            try:
+                await self.megamem_client._search(
+                    query="health",
+                    config=hc_config,
+                    group_ids=[group_id]
+                )
+            finally:
+                _gcore_logger.setLevel(_prev_level)
+            return True
+        except Exception as embed_err:
+            err_str = str(embed_err)
+            err_type = type(embed_err).__name__
+            # Only mark embedder unhealthy for actual connectivity failures, not Neo4j data errors
+            # e.g. dimension mismatch in stored embeddings is a data issue, not an embedder issue
+            _EMBEDDER_CONN_ERRORS = ('APIConnectionError', 'ConnectionRefusedError', 'ConnectError',
+                                     'ConnectionError', 'OllamaError', 'HTTPStatusError')
+            is_embedder_conn_err = (
+                any(x in err_type for x in _EMBEDDER_CONN_ERRORS) or
+                any(x in err_str for x in ('Connection refused', 'connect ECONNREFUSED',
+                                           'Failed to establish', 'ollama serve'))
+            )
+            if is_embedder_conn_err:
+                provider = self.bridge_config.embedder_provider if self.bridge_config else 'ollama'
+                base_url = (self.bridge_config.ollama_base_url if self.bridge_config else None) or 'http://localhost:11434'
+                if provider == 'ollama':
+                    logger.error(
+                        f"[EMBEDDER ERROR] Ollama is not running or unreachable at {base_url}. "
+                        f"Run: ollama serve. (actual error: {embed_err})"
+                    )
+                else:
+                    logger.error(f"[EMBEDDER ERROR] Embedder unreachable ({provider}): {embed_err}")
+                return False
+            # Neo4j/data error (e.g. dimension mismatch) — embedder is healthy, log as warning
+            logger.warning(
+                f"[EMBEDDER HEALTH] Health check query failed with non-embedder error "
+                f"(embedder marked healthy): {err_type}: {embed_err}"
+            )
+            return True
+
+    async def _ensure_embedder_healthy(self) -> bool:
+        """
+        @purpose: Self-healing replacement for the sticky embedder_healthy flag (Day78.02)
+        @depends: self._probe_embedder_health, self._embedder_check_cooldown
+        @results: Re-checks a stale-False flag on demand instead of requiring a full process
+                  restart; a cooldown prevents hammering a genuinely-down embedder on every call
+        """
+        if self.embedder_healthy:
+            return True
+        if not self.megamem_client or self.megamem_client == "RPC_MODE":
+            return False
+
+        now = time.monotonic()
+        if now - self._embedder_last_checked < self._embedder_check_cooldown:
+            return False  # still within cooldown window since the last failed re-check
+
+        self._embedder_last_checked = now
+        group_id = self.bridge_config.default_namespace if self.bridge_config else "default"
+        healthy = await self._probe_embedder_health(group_id)
+        if healthy:
+            logger.info("[EMBEDDER HEALTH] Lazy re-check succeeded — embedder marked healthy again")
+            self.embedder_healthy = True
+        return healthy
+
     async def _background_resource_loading(self, bridge_config: BridgeConfig):
         """Background task for heavy resource loading"""
         try:
@@ -2056,53 +2143,11 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
             self.megamem_client = megamem_client
 
             # @purpose: Embedder health check @depends: megamem_client @results: Clear startup log if Ollama/embedder unreachable
-            try:
-                hc_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
-                hc_config.limit = 1
-                # Suppress graphiti-core's internal "Error executing" stderr spam during this probe —
-                # we handle the exception ourselves below
-                import logging as _logging
-                _gcore_logger = _logging.getLogger("graphiti_core")
-                _prev_level = _gcore_logger.level
-                _gcore_logger.setLevel(_logging.CRITICAL)
-                try:
-                    await self.megamem_client._search(
-                        query="health",
-                        config=hc_config,
-                        group_ids=[bridge_config.default_namespace]
-                    )
-                finally:
-                    _gcore_logger.setLevel(_prev_level)
+            self._embedder_last_checked = time.monotonic()
+            if await self._probe_embedder_health(bridge_config.default_namespace):
                 logger.info("[BACKGROUND] Embedder health check passed")
-            except Exception as embed_err:
-                err_str = str(embed_err)
-                err_type = type(embed_err).__name__
-                # Only mark embedder unhealthy for actual connectivity failures, not Neo4j data errors
-                # e.g. dimension mismatch in stored embeddings is a data issue, not an embedder issue
-                _EMBEDDER_CONN_ERRORS = ('APIConnectionError', 'ConnectionRefusedError', 'ConnectError',
-                                         'ConnectionError', 'OllamaError', 'HTTPStatusError')
-                is_embedder_conn_err = (
-                    any(x in err_type for x in _EMBEDDER_CONN_ERRORS) or
-                    any(x in err_str for x in ('Connection refused', 'connect ECONNREFUSED',
-                                               'Failed to establish', 'ollama serve'))
-                )
-                if is_embedder_conn_err:
-                    self.embedder_healthy = False
-                    provider = bridge_config.embedder_provider
-                    base_url = bridge_config.ollama_base_url or 'http://localhost:11434'
-                    if provider == 'ollama':
-                        logger.error(
-                            f"[EMBEDDER ERROR] Ollama is not running or unreachable at {base_url}. "
-                            f"Run: ollama serve. (actual error: {embed_err})"
-                        )
-                    else:
-                        logger.error(f"[EMBEDDER ERROR] Embedder unreachable ({provider}): {embed_err}")
-                else:
-                    # Neo4j/data error (e.g. dimension mismatch) — embedder is healthy, log as warning
-                    logger.warning(
-                        f"[EMBEDDER HEALTH] Health check query failed with non-embedder error "
-                        f"(embedder marked healthy): {err_type}: {embed_err}"
-                    )
+            else:
+                self.embedder_healthy = False
 
             # Initialize DB constraints after graphiti client is ready
             logger.info("[BACKGROUND] Building database indices...")

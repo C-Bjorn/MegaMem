@@ -61,6 +61,13 @@ class BridgeConfig:
     timeout: int = 30
     debug: bool = False
 
+    # Day78.04 (Issue #20): Ollama context window size (num_ctx), passed via
+    # extra_body by OllamaGenericClient (ollama_client.py). graphiti_core's
+    # LLMConfig has no field for this — Ollama otherwise loads models at its
+    # 131072-token default context (observed: ~22GB reserved for a 2.5GB model
+    # vs ~3.9GB at num_ctx=8192). Only consumed when llm_provider == 'ollama'.
+    ollama_num_ctx: int = 8192
+
     # Episode and Ontology Configuration
     use_custom_ontology: bool = False
     use_bulk_sync: bool = False
@@ -173,6 +180,10 @@ class BridgeConfig:
             debug=config_dict.get('debug') or config_dict.get(
                 'debugMode', False),
 
+            # Day78.04 (Issue #20): Ollama context window override
+            ollama_num_ctx=config_dict.get(
+                'ollama_num_ctx') or config_dict.get('ollamaNumCtx', 8192),
+
             # Episode and Ontology Configuration
             use_custom_ontology=config_dict.get(
                 'use_custom_ontology') or config_dict.get('useCustomOntology', False),
@@ -228,6 +239,22 @@ class BridgeConfig:
     @classmethod
     def _get_database_field(cls, config_dict: Dict[str, Any], snake_key: str, camel_key: str, default_value: str, nested_key: Optional[str] = None) -> Optional[str]:
         """Get database field with proper None handling for FalkorDB"""
+
+        # Issue #19: Neo4j no-auth catch-22 fix.
+        # An empty database_username was unconditionally re-defaulted to 'neo4j' below,
+        # which then tripped validate()'s "password required when username is set" check
+        # for intentional no-auth setups (empty username + empty password).
+        # Only apply the 'neo4j' default when a password is actually present, so an
+        # empty username + empty password pair is preserved as no-auth. FalkorDB's
+        # None-preserving behavior (below) is untouched by this branch.
+        if snake_key == 'database_username':
+            database_type = config_dict.get('database_type') or config_dict.get('databaseType', 'neo4j')
+            if database_type == 'neo4j':
+                password = cls._get_database_field(
+                    config_dict, 'database_password', 'databasePassword', '', nested_key='password')
+                if not password:
+                    default_value = ''
+
         # Check snake_case first
         if snake_key in config_dict:
             value = config_dict[snake_key]
