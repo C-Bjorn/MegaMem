@@ -1,5 +1,7 @@
 # MegaMem — Obsidian × Knowledge Graph × MCP
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2FC-Bjorn%2FMegaMem.svg)](https://mcptoplist.com/server/glama%2FC-Bjorn%2FMegaMem)
+
 > **Temporal memory for AI assistants, powered by your Private vault**
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
