@@ -2031,9 +2031,11 @@ class ObsidianCLI:
         file: Optional[str] = None,
         path: Optional[str] = None,
     ) -> dict:
-        """List views in a base file.
-        CLI: obsidian base:views file=<name>  OR  path=<path>
-        For MCP use, always pass explicit file= or path= — never rely on active-file defaults.
+        """List views in Obsidian's active Base file.
+
+        The current Obsidian CLI does not support selecting a Base for
+        ``base:views``. CLIFileTools reads explicitly selected Base YAML files
+        itself instead; this method remains for active-file callers only.
         """
         args = ["base:views"]
         if file:

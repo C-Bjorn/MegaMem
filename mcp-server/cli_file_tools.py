@@ -12,9 +12,15 @@ No WebSocket dependency. Vault is resolved from the CLI vault registry.
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from obsidian_cli import ObsidianCLI, detect_obsidian_binary
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 logger = logging.getLogger(__name__)
 
@@ -446,7 +452,149 @@ class CLIFileTools:
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
-        return await asyncio.to_thread(self.cli.list_base_views, vault, file, path)
+        vault_path = self._vault_path(vault)
+        if not vault_path:
+            vaults_result = await asyncio.to_thread(self.cli.list_obsidian_vaults)
+            if vaults_result.get("success"):
+                for configured_vault in vaults_result.get("payload", {}).get("vaults", []):
+                    self._vault_paths[configured_vault["name"]] = configured_vault.get("path", "")
+                vault_path = self._vault_path(vault)
+
+        if not vault_path:
+            return {
+                "success": False,
+                "error": f"Could not find a filesystem path for vault '{vault}'.",
+                "error_code": "VAULT_PATH_UNAVAILABLE",
+            }
+
+        return await asyncio.to_thread(self._read_base_views, vault_path, file, path)
+
+    @staticmethod
+    def _read_base_views(
+        vault_path: str,
+        file: Optional[str],
+        path: Optional[str],
+    ) -> Dict[str, Any]:
+        """Read view names directly from a Base YAML file.
+
+        Obsidian CLI's ``base:views`` only supports the active Base, even when
+        ``file`` or ``path`` is supplied. Querying an explicitly selected Base
+        is therefore intentionally handled from its on-disk YAML here.
+        """
+        if path:
+            candidate = Path(vault_path, path)
+        elif file:
+            if any(character in file for character in "*?[]"):
+                return {
+                    "success": False,
+                    "error": "Base file must be a literal basename, not a glob pattern.",
+                    "error_code": "INVALID_BASE_PATH",
+                }
+            requested_file = Path(file)
+            if requested_file.is_absolute():
+                return {
+                    "success": False,
+                    "error": "Base file must be relative to the selected vault.",
+                    "error_code": "INVALID_BASE_PATH",
+                }
+            filename = file if file.endswith(".base") else f"{file}.base"
+            matches = list(Path(vault_path).rglob(filename))
+            if len(matches) != 1:
+                detail = "no matching Base file" if not matches else "multiple matching Base files"
+                return {
+                    "success": False,
+                    "error": f"Could not resolve '{filename}': {detail}. Use path instead.",
+                    "error_code": "BASE_NOT_UNIQUE",
+                }
+            candidate = matches[0]
+        else:
+            return {
+                "success": False,
+                "error": "file or path required for list_base_views",
+                "error_code": "BASE_PATH_REQUIRED",
+            }
+
+        vault_root = Path(vault_path).resolve()
+        try:
+            base_path = candidate.resolve()
+            base_path.relative_to(vault_root)
+        except (OSError, RuntimeError, ValueError):
+            return {
+                "success": False,
+                "error": "Base path must be inside the selected vault.",
+                "error_code": "INVALID_BASE_PATH",
+            }
+
+        if base_path.suffix != ".base" or not base_path.is_file():
+            return {
+                "success": False,
+                "error": f"Base file not found: {path or file}",
+                "error_code": "BASE_NOT_FOUND",
+            }
+
+        try:
+            base_content = base_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {
+                "success": False,
+                "error": f"Could not read Base file: {exc}",
+                "error_code": "BASE_READ_ERROR",
+            }
+
+        if yaml is not None:
+            try:
+                parsed = yaml.safe_load(base_content) or {}
+            except yaml.YAMLError as exc:
+                return {
+                    "success": False,
+                    "error": f"Could not parse Base YAML: {exc}",
+                    "error_code": "BASE_PARSE_ERROR",
+                }
+            configured_views = parsed.get("views", []) if isinstance(parsed, dict) else []
+            views = [
+                view["name"]
+                for view in configured_views
+                if isinstance(view, dict) and isinstance(view.get("name"), str)
+            ]
+            return {"success": True, "payload": {"views": views, "totalViews": len(views)}}
+
+        # Compatibility fallback for an installation that has not yet installed
+        # the PyYAML dependency. Obsidian-generated Base files use this shape.
+        lines = base_content.splitlines()
+        views: List[str] = []
+        views_indent: Optional[int] = None
+        view_indent: Optional[int] = None
+        for line in lines:
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            if views_indent is None:
+                if stripped == "views:":
+                    views_indent = indent
+                continue
+            if stripped and indent <= views_indent:
+                break
+            if stripped.startswith("- ") and indent > views_indent:
+                if view_indent is None:
+                    view_indent = indent
+                if indent != view_indent:
+                    continue
+                inline_name = stripped.removeprefix("- ").strip()
+                if inline_name.startswith("name:"):
+                    name = inline_name.removeprefix("name:").strip()
+                    if len(name) >= 2 and name[0] == name[-1] and name[0] in ("'", '"'):
+                        name = name[1:-1]
+                    if name:
+                        views.append(name)
+                continue
+            if view_indent is None or indent != view_indent + 2 or not stripped.startswith("name:"):
+                continue
+            name = stripped.removeprefix("name:").strip()
+            if len(name) >= 2 and name[0] == name[-1] and name[0] in ("'", '"'):
+                name = name[1:-1]
+            if name:
+                views.append(name)
+
+        return {"success": True, "payload": {"views": views, "totalViews": len(views)}}
 
     async def query_base(
         self,
