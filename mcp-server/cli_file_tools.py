@@ -467,29 +467,35 @@ class CLIFileTools:
                 "error_code": "VAULT_PATH_UNAVAILABLE",
             }
 
-        return await asyncio.to_thread(self._read_base_views, vault_path, file, path)
+        base_paths: Optional[List[str]] = None
+        if file and not path:
+            bases_result = await asyncio.to_thread(self.cli.list_bases, vault)
+            if not bases_result.get("success"):
+                return bases_result
+            base_paths = bases_result.get("payload", {}).get("bases", [])
+
+        return await asyncio.to_thread(
+            self._read_base_views, vault_path, file, path, base_paths
+        )
 
     @staticmethod
     def _read_base_views(
         vault_path: str,
         file: Optional[str],
         path: Optional[str],
+        base_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Read view names directly from a Base YAML file.
 
         Obsidian CLI's ``base:views`` only supports the active Base, even when
         ``file`` or ``path`` is supplied. Querying an explicitly selected Base
-        is therefore intentionally handled from its on-disk YAML here.
+        is therefore intentionally handled from its on-disk YAML here. Basename
+        resolution uses ``obsidian bases`` output so hidden/non-vault files do
+        not affect ambiguity checks.
         """
         if path:
             candidate = Path(vault_path, path)
         elif file:
-            if any(character in file for character in "*?[]"):
-                return {
-                    "success": False,
-                    "error": "Base file must be a literal basename, not a glob pattern.",
-                    "error_code": "INVALID_BASE_PATH",
-                }
             requested_file = Path(file)
             if requested_file.is_absolute():
                 return {
@@ -498,7 +504,11 @@ class CLIFileTools:
                     "error_code": "INVALID_BASE_PATH",
                 }
             filename = file if file.endswith(".base") else f"{file}.base"
-            matches = list(Path(vault_path).rglob(filename))
+            matches = [
+                base_path
+                for base_path in (base_paths or [])
+                if Path(base_path).name == filename
+            ]
             if len(matches) != 1:
                 detail = "no matching Base file" if not matches else "multiple matching Base files"
                 return {
@@ -506,7 +516,7 @@ class CLIFileTools:
                     "error": f"Could not resolve '{filename}': {detail}. Use path instead.",
                     "error_code": "BASE_NOT_UNIQUE",
                 }
-            candidate = matches[0]
+            candidate = Path(vault_path, matches[0])
         else:
             return {
                 "success": False,
@@ -541,59 +551,41 @@ class CLIFileTools:
                 "error_code": "BASE_READ_ERROR",
             }
 
-        if yaml is not None:
-            try:
-                parsed = yaml.safe_load(base_content) or {}
-            except yaml.YAMLError as exc:
-                return {
-                    "success": False,
-                    "error": f"Could not parse Base YAML: {exc}",
-                    "error_code": "BASE_PARSE_ERROR",
-                }
-            configured_views = parsed.get("views", []) if isinstance(parsed, dict) else []
-            views = [
-                view["name"]
-                for view in configured_views
-                if isinstance(view, dict) and isinstance(view.get("name"), str)
-            ]
-            return {"success": True, "payload": {"views": views, "totalViews": len(views)}}
+        if yaml is None:
+            return {
+                "success": False,
+                "error": "PyYAML is required to read Obsidian Base files.",
+                "error_code": "MISSING_DEPENDENCY",
+            }
 
-        # Compatibility fallback for an installation that has not yet installed
-        # the PyYAML dependency. Obsidian-generated Base files use this shape.
-        lines = base_content.splitlines()
-        views: List[str] = []
-        views_indent: Optional[int] = None
-        view_indent: Optional[int] = None
-        for line in lines:
-            stripped = line.lstrip()
-            indent = len(line) - len(stripped)
-            if views_indent is None:
-                if stripped == "views:":
-                    views_indent = indent
-                continue
-            if stripped and indent <= views_indent:
-                break
-            if stripped.startswith("- ") and indent > views_indent:
-                if view_indent is None:
-                    view_indent = indent
-                if indent != view_indent:
-                    continue
-                inline_name = stripped.removeprefix("- ").strip()
-                if inline_name.startswith("name:"):
-                    name = inline_name.removeprefix("name:").strip()
-                    if len(name) >= 2 and name[0] == name[-1] and name[0] in ("'", '"'):
-                        name = name[1:-1]
-                    if name:
-                        views.append(name)
-                continue
-            if view_indent is None or indent != view_indent + 2 or not stripped.startswith("name:"):
-                continue
-            name = stripped.removeprefix("name:").strip()
-            if len(name) >= 2 and name[0] == name[-1] and name[0] in ("'", '"'):
-                name = name[1:-1]
-            if name:
-                views.append(name)
+        try:
+            parsed = yaml.safe_load(base_content) or {}
+        except yaml.YAMLError as exc:
+            return {
+                "success": False,
+                "error": f"Could not parse Base YAML: {exc}",
+                "error_code": "BASE_PARSE_ERROR",
+            }
 
+        if not isinstance(parsed, dict):
+            return {
+                "success": False,
+                "error": "Could not parse Base YAML: top-level value must be a mapping.",
+                "error_code": "BASE_PARSE_ERROR",
+            }
+        configured_views = parsed.get("views", [])
+        if not isinstance(configured_views, list):
+            return {
+                "success": False,
+                "error": "Could not parse Base YAML: 'views' must be a list.",
+                "error_code": "BASE_PARSE_ERROR",
+            }
+
+        views = [
+            view["name"]
+            for view in configured_views
+            if isinstance(view, dict) and isinstance(view.get("name"), str)
+        ]
         return {"success": True, "payload": {"views": views, "totalViews": len(views)}}
 
     async def query_base(
