@@ -15,7 +15,7 @@ import argparse
 import contextlib
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 import socket
 import subprocess
 import psutil
@@ -495,7 +495,7 @@ class ObsidianMegaMemMCPServer:
 
         # @purpose: Episode queuing to prevent race conditions @depends: asyncio.Queue @results: Sequential episode processing per group_id
         self.episode_queues: Dict[str, asyncio.Queue] = {}
-        self.queue_workers: Dict[str, bool] = {}
+        self.queue_workers: Dict[str, asyncio.Task[None]] = {}
 
         # @purpose: Token profiles for HTTP transport gating @depends: httpTokenProfiles in data.json @results: Per-token access control
         self.http_token_profiles: List[Dict] = []
@@ -1130,7 +1130,6 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
 
     async def process_episode_queue(self, group_id: str):
         """Process episodes for a group_id sequentially"""
-        self.queue_workers[group_id] = True
         try:
             while True:
                 process_func = await self.episode_queues[group_id].get()
@@ -1143,7 +1142,30 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
         except asyncio.CancelledError:
             logger.info(f"Queue worker for {group_id} cancelled")
         finally:
-            self.queue_workers[group_id] = False
+            current_task = asyncio.current_task()
+            if self.queue_workers.get(group_id) is current_task:
+                self.queue_workers.pop(group_id, None)
+                queue = self.episode_queues.get(group_id)
+                if queue is not None and not queue.empty():
+                    self._ensure_episode_queue_worker(group_id)
+
+    def _ensure_episode_queue_worker(self, group_id: str) -> asyncio.Task[None]:
+        worker = self.queue_workers.get(group_id)
+        if worker is None or worker.done():
+            worker = asyncio.create_task(self.process_episode_queue(group_id))
+            self.queue_workers[group_id] = worker
+        return worker
+
+    async def _enqueue_episode(
+        self,
+        group_id: str,
+        process_func: Callable[[], Awaitable[None]],
+    ) -> int:
+        queue = self.episode_queues.setdefault(group_id, asyncio.Queue())
+        position = queue.qsize() + 1
+        await queue.put(process_func)
+        self._ensure_episode_queue_worker(group_id)
+        return position
 
     def _format_fact_result(self, edge: Any) -> Dict[str, Any]:
         """Formats an EntityEdge into a serializable dictionary."""
@@ -1261,15 +1283,7 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
                     client = await self._get_graphiti_client(db_id)
                     await client.add_episode(**episode_kwargs)
                 
-                # Queue management
-                if group_id_str not in self.episode_queues:
-                    self.episode_queues[group_id_str] = asyncio.Queue()
-                
-                position = self.episode_queues[group_id_str].qsize() + 1
-                await self.episode_queues[group_id_str].put(process_episode)
-                
-                if not self.queue_workers.get(group_id_str, False):
-                    asyncio.create_task(self.process_episode_queue(group_id_str))
+                position = await self._enqueue_episode(group_id_str, process_episode)
                 
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
@@ -1746,15 +1760,7 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
                     client = await self._get_graphiti_client(db_id)
                     await client.add_episode(**episode_kwargs)
 
-                # Queue management
-                if group_id not in self.episode_queues:
-                    self.episode_queues[group_id] = asyncio.Queue()
-
-                position = self.episode_queues[group_id].qsize() + 1
-                await self.episode_queues[group_id].put(process_episode)
-
-                if not self.queue_workers.get(group_id, False):
-                    asyncio.create_task(self.process_episode_queue(group_id))
+                position = await self._enqueue_episode(group_id, process_episode)
 
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
