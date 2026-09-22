@@ -15,8 +15,10 @@ class RecordingGraphitiClient:
     def __init__(self):
         self.active = 0
         self.max_active = 0
+        self.episodes = []
 
     async def add_episode(self, **kwargs):
+        self.episodes.append(kwargs)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -34,6 +36,15 @@ def test_concurrent_add_memory_and_conversation_share_one_group_worker(tmp_path,
         client = RecordingGraphitiClient()
         server.megamem_client = client
         server._get_graphiti_client = AsyncMock(return_value=client)
+        worker_starts = 0
+        original_worker = server.process_episode_queue
+
+        async def track_worker_start(group_id):
+            nonlocal worker_starts
+            worker_starts += 1
+            await original_worker(group_id)
+
+        server.process_episode_queue = track_worker_start
         config_path = tmp_path / "config.json"
         config_path.write_text(json.dumps({"useCustomOntology": False}))
         monkeypatch.setenv("OBSIDIAN_CONFIG_PATH", str(config_path))
@@ -54,6 +65,10 @@ def test_concurrent_add_memory_and_conversation_share_one_group_worker(tmp_path,
 
         assert all(json.loads(response[0].text)["success"] for response in responses)
         assert client.max_active == 1
+        assert len(client.episodes) == 2
+        assert any(episode["name"] == "fact" for episode in client.episodes)
+        assert any(episode["name"].startswith("Conversation_") for episode in client.episodes)
+        assert worker_starts == 1
 
         worker = server.queue_workers["shared"]
         worker.cancel()
