@@ -59,6 +59,8 @@ cd mcp-server
 pip install -r requirements.txt
 ```
 
+`requirements.txt` pins `graphiti-core` to exactly 0.29.3 and `mcp` to `>=1.28,<2`. The server exits at startup with a FATAL message if it finds `mcp` 2.x or older than 1.28. Normally you don't run this by hand — use the plugin's **Install Dependencies** button (Settings → Python Environment).
+
 ### 2. Configure Claude Desktop
 
 Add the following to your Claude Desktop configuration file:

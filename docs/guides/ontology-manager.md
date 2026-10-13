@@ -11,7 +11,7 @@ tags:
   - Configuration
 last_updated: 2026-03-05
 date_created: 2025-09-23T17:40
-date_updated: 2026-03-05T00:00
+date_updated: 2026-10-13T00:00
 ---
 
 # Ontology Manager
@@ -39,12 +39,13 @@ This file contains all schema-related data: entity descriptions, edge types, edg
 
 ## Overview
 
-The Ontology Manager is divided into four main tabs:
+The Ontology Manager is divided into five main tabs:
 
 -   **Entity Types**: Manage the different types of entities (e.g., Person, Project, Concept) discovered in your vault.
 -   **Properties**: Configure the attributes associated with each entity type.
 -   **Edge Types**: Define the types of relationships that can exist between entities (e.g., `WORKS_FOR`, `USES`).
 -   **Edge Mappings**: Specify which entity types can be connected by which edge types.
+-   **Dynamic Rules**: Scope which entity and edge types are sent to extraction for each kind of note.
 
 Each section offers tools for defining schema elements, editing descriptions, and interacting with default or LLM-suggested configurations.
 
@@ -281,6 +282,13 @@ Each tab has a dedicated **🗑️ Cleanup** button for removing stale or redund
 | Edge Mappings | 🗑️ Cleanup Mappings | Removing stale or test mappings |
 
 The **Skip User-Defined** toggle (on Edge Types and Edge Mappings cleanup) protects any entries you manually created or marked as user-defined.
+
+## Dynamic Rules
+
+The **Dynamic Rules** tab filters the schema *before* each note is sent to `add_episode`. Each rule has a name, a frontmatter match field (for example `type`), the values to match (for example `CodeDoc`, `DevDoc`), and the entity types and edge types that should be sent for matching notes. Rules can be enabled or disabled individually.
+
+- A built-in **default catch-all rule** is always last and always enabled; it cannot be removed or have its match fields edited. Until you add rules, it includes everything, so extraction behaves as it did before.
+- Rules are stored in their own file, **`dynamic-rules.json`**, alongside `ontology.json` in the plugin folder — not in `data.json` or `ontology.json`.
 
 ## Per-Namespace Configuration
 

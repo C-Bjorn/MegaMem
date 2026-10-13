@@ -9,7 +9,7 @@ tags:
   - future
 sidebar: auto
 date_created: 2025-09-23T11:23
-date_updated: 2026-03-23T00:00
+date_updated: 2026-10-13T00:00
 ---
 
 # 🗺️ MegaMem Development Roadmap
@@ -19,6 +19,8 @@ This document provides a concise overview of the MegaMem project's evolution, hi
 ## ✅ Achieved Milestones
 
 MegaMem has successfully established a robust foundation, delivering powerful integration between Obsidian and advanced knowledge graph capabilities:
+
+- **v1.8.0 — Publish, Dynamic Rules, TLS, Hosted Graph**: **Publish** replicates a chosen namespace to a separate destination database such as Neo4j Aura. **Dynamic Ontology Rules** (Schema Manager → Dynamic Rules tab) filter which entity/edge types are sent per note type. **FalkorDB TLS** and a one-click **Endogon Hosted Graph** (Pro). The `ask_bjorn` MCP tool (Pro). FalkorDB now has real namespace isolation, `mm_group_id` is honoured everywhere (`g_group_id` deprecated), and Python dependencies are pinned (`graphiti-core` 0.29.3, `mcp>=1.28,<2`). See the CHANGELOG for upgrade notes.
 
 - **Unified MegaMem Panel & Sync Analytics Dashboard** *(v1.5.5)*: Two separate side-panels (Schema Manager + Sync Manager) merged into a single tabbed sidebar panel. Ribbon replaced with a copper/orange 🧠 brain icon. Three tabs — **Ontology**, **Sync**, **Analytics** — with last-active-tab persistence. The **Analytics tab** delivers: animated summary cards (Synced Notes, Entities, Edges, Estimated Cost), a **Sync Timeline** line/area chart (day/hour granularity, toggleable Entities series), a **Token Usage by Model** stacked-bar chart with Big / Small / Both Model views, a sortable **Model Performance table** with Provider column, and a **Synced Notes accordion** with expandable per-session detail (InTokens, OutTokens, TotalTokens, Duration, Small Model, Error). Sync Health section shows failure list and duration trend. Model Library pricing syncs to `model_pricing` SQLite table on every provider fetch and on plugin startup for cost estimates. Content-hash pre-check skips syncs for unchanged notes. Episode UUID chaining migrated from `mm_uid` frontmatter to SQLite as authoritative source.
 
@@ -49,12 +51,10 @@ MegaMem has successfully established a robust foundation, delivering powerful in
 
 Our focus remains on expanding MegaMem's capabilities while maintaining simplicity and performance:
 
-- **Dynamic Ontology Rules**: Type-based filtering so only the relevant entity/edge types are sent per `add_episode()` call. For a 20-entity-type ontology, this can reduce token cost by 60–75% per sync.
 - **Obsidian Community Plugins Submission**: Public GitHub release with versioning per Obsidian guidelines and submission to the community plugin repository.
 - **Graph Visualization**: Integrate an interactive graph view (evaluating d3.js, cytoscape) directly inside Obsidian for a visual map of your knowledge.
 - **Built-in LLM Chat Interface**: Native chat interface within Obsidian for direct knowledge graph interaction — ask questions, get answers, all without leaving your vault.
-- **Cloud-hosted Graph Option**: Hosted graph database for users who don't want to run Neo4j or FalkorDB locally.
-- **Ask Bjørn** *(Pro)*: Hosted AI assistant with deep MegaMem context — powered by your graph, accessible in-vault.
+- **Ask Bjørn in-vault** *(Pro)*: In-vault assistant experience with deep MegaMem context (the `ask_bjorn` MCP tool is available today).
 - **Additional Databases**: Kuzu and Amazon Neptune support.
 - **Mobile**: Evaluate feasibility of mobile vault sync.
 

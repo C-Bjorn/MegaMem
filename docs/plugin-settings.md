@@ -1,6 +1,6 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2026-03-23
+date_updated: 2026-10-13
 ---
 # MegaMem Plugin Settings
 
@@ -36,7 +36,13 @@ On install/update: the plugin fetches a signed download URL from the edge functi
 
 ### Premium Features
 
-Placeholder for upcoming hosted services — currently shows the **Ask Bjørn** coming-soon card.
+### Hosted Graph
+
+Visible only when your plan includes the `graph_hosting` entitlement. Click **Add graph to MegaMem** to add your Endogon-hosted FalkorDB graph as a database in one click (host, port, TLS, credentials, and graph name are fetched live). Once added, the section shows that the hosted graph already exists; manage it in Database Configuration. To re-fetch connection details later, open the database's edit form and click **Refresh from Endogon**.
+
+### Ask Bjørn
+
+The `ask_bjorn` MCP tool is registered only when your key is valid and carries the `service.ask_bjorn` capability. It is unmetered.
 
 ---
 
@@ -156,9 +162,9 @@ Configure language model providers and specific models.
 - **Test LLM Connection** <i data-lucide="zap"></i>: Test your language model provider configuration
 
 ### Embedding Provider <i data-lucide="check-circle"></i>
-- Description: Choose your embedding provider (global default — now overridable per-database)
+- Description: Choose your embedding provider (legacy global default — frozen as of v1.8.0; per-database settings always win)
 - Options: OpenAI, Google AI, Voyage AI, Ollama (Local)
-- Developer Note: Legacy global setting. As of v1.5, embedding is configured per-DB in the Database accordion. This field remains as a fallback for users with a single database.
+- Developer Note: Legacy global setting. Embedding is configured per-DB in the Database accordion, and the per-database provider/model always wins. As of v1.8.0 the legacy top-level fields are frozen (not used to fill in a database's embedder), `databases[]` entries are silently backfilled from them once, and an unresolvable provider/model raises an error instead of defaulting to OpenAI.
 
 ### Embedding Model <i data-lucide="check-circle"></i>
 - Description: Model for generating embeddings (global default)
@@ -201,8 +207,8 @@ The "Databases" accordion shows all configured database targets. Each entry coll
 
 **Expanded edit form fields:**
 - **Label**: Human-readable name (e.g., "Personal Neo4j", "Company Graph")
-- **Type**: Neo4j or FalkorDB
-- **URI / Host / Port**: Connection coordinates
+- **Type**: Neo4j, FalkorDB, or Endogon (Pro — fetches your hosted graph connection using your Pro key)
+- **URI / Host / Port**: Connection coordinates. FalkorDB accepts a single URL/host input and a **Use TLS / SSL** toggle for TLS-only instances (e.g. FalkorDB Cloud). Neo4j Aura `neo4j+s://` URIs are supported.
 - **Username / Password / Database Name**: Authentication
 - **Embedding Provider**: Per-database embedding provider (OpenAI, Google, Voyage, Ollama)
 - **Embedding Model**: Per-database embedding model
@@ -211,6 +217,7 @@ The "Databases" accordion shows all configured database targets. Each entry coll
 **Actions per entry:**
 - **Test Connection**: Verifies connection to this specific database
 - **Remove**: Deletes this database configuration
+- **Refresh from Endogon** *(Endogon-sourced databases only)*: Re-fetches connection details from Endogon
 
 **Add Database:** Opens an inline form to add a new database entry. Fill connection details and embedding config, then save.
 
@@ -262,8 +269,11 @@ A dedicated **"Multi-Vault Mode"** accordion controls master/child vault relatio
 - **System Python**: For advanced users who prefer to use their own Python installation.
 
 #### Actions:
+- **Manage Dependencies** <i data-lucide="search"></i>: Opens the dependency status modal with a dependency health readout (installed vs. required versions)
 - **Check Dependencies** <i data-lucide="search"></i>: Check if Graphiti Python dependencies are installed
-- **Install Dependencies** <i data-lucide="package-plus"></i>: Install Graphiti and required Python packages. The default UV method downloads the uv package manager and uses it to create an isolated Python environment with all required dependencies.
+- **Install Dependencies** <i data-lucide="package-plus"></i>: Install Graphiti and required Python packages. The default UV method downloads the uv package manager and uses it to create an isolated Python environment with all required dependencies. Dependencies are pinned: `graphiti-core` exactly 0.29.3 and `mcp>=1.28,<2`. pip is bootstrapped via `ensurepip` when needed. **After upgrading to v1.8.0, click Install Dependencies again.** The MCP server exits at startup with a FATAL message if it finds `mcp` 2.x or older than 1.28.
+
+> **Windows note:** Defender scanning a freshly created venv can exceed the MCP handshake window on first start. Restart your MCP client once; consider adding a Defender exclusion for the venv folder.
 
 ### Python Environment Location <i data-lucide="check-circle"></i>
 - Description: The Python virtual environment is **vault-specific** — each Obsidian vault gets its own isolated environment to prevent conflicts between vaults.
@@ -371,7 +381,7 @@ Configure how knowledge is organized in the graph database.
 - **Delete** <i data-lucide="x"></i>: Remove folder mapping (per mapping)
 
 ### Enable Property Namespacing <i data-lucide="check-circle"></i>
-- Description: Use `mm_group_id` frontmatter property as namespace when available. (`g_group_id` is deprecated — still supported with a warning log, but rename to `mm_group_id`.)
+- Description: Use `mm_group_id` frontmatter property as namespace when available. `mm_group_id` is now honoured on every sync path via a single shared resolver (`src/utils/NamespaceResolver.ts`) — earlier versions silently ignored it on write. `g_group_id` is deprecated: still supported as a fallback, but it shows a warning notice; rename it to `mm_group_id`. A note carrying both keys with different values is flagged (`mm_group_id` wins). On upgrade, a note with `mm_group_id` may sync to a different namespace than before; a note with only `g_group_id` resolves exactly as before.
 - Developer Note: Property-based namespace detection.
 
 ### Namespace Discovery
@@ -435,7 +445,7 @@ Each profile is a collapsible accordion. The **Admin** profile (always first) ha
 | Client | Format |
 |--------|--------|
 | **Roo Code** | `streamable-http` type JSON |
-| **Claude Desktop** | `npx mcp-remote` command |
+| **Claude Desktop** | `npx mcp-remote` command — requires Node.js installed; MegaMem warns after copying if Node.js is not found |
 | **Claude Code** | `claude mcp add` CLI command |
 | **Cursor** | `streamable-http` type JSON |
 | **VS Code** | `servers` key, `http` type JSON |

@@ -178,7 +178,16 @@ class DynamicModelLoader:
 
     def _get_entity_fields_from_data(self, entity_name: str, enabled_properties: List[str],
                                      property_descriptions: Dict[str, Any]) -> Dict[str, tuple]:
-        """Generate entity fields based on data.json selections and mappings"""
+        """Generate entity fields based on data.json selections and mappings.
+
+        Day79.02 Task 2.3 (durable fix) — emits a per-field Pydantic max_length so
+        graphiti-core's cap_string_attributes() cap precedence (explicit Field(max_length)
+        > GRAPHITI_ATTRIBUTE_MAX_LENGTH env var > 250 default) resolves to a value
+        appropriate for THIS property, rather than relying on the interim global env
+        var for every field. Explicit `maxLength` set on the ontology property (via the
+        UI, once wired) always wins; otherwise a sensible default is inferred from the
+        property name (see _infer_max_length_for_property).
+        """
         fields = {}
 
         # Get entity-specific property descriptions
@@ -199,9 +208,21 @@ class DynamicModelLoader:
                 field_type = prop_info.get('fieldType', 'str')
                 python_type = self._get_python_type(field_type)
 
-                # Use snake_case name for the field (as required by Graphiti)
-                fields[property_name] = (
-                    Optional[python_type], Field(None, description=description))
+                # Day79.02 Task 2.3 — per-field max_length. Only meaningful for
+                # str / List[str] fields; graphiti-core's cap only inspects those types
+                # (see _check_value_against_cap in attribute_utils.py) and Pydantic
+                # rejects max_length on non-string/non-list/non-collection types.
+                max_length = self._resolve_property_max_length(
+                    property_name, field_type, prop_info)
+
+                if max_length is not None and field_type in ('str', 'List[str]'):
+                    fields[property_name] = (
+                        Optional[python_type],
+                        Field(None, description=description, max_length=max_length))
+                else:
+                    # Use snake_case name for the field (as required by Graphiti)
+                    fields[property_name] = (
+                        Optional[python_type], Field(None, description=description))
 
             except Exception as e:
                 self.logger.error(
@@ -209,6 +230,63 @@ class DynamicModelLoader:
                 continue
 
         return fields
+
+    # Day79.02 Task 2.3 — sensible per-property-type defaults, not one global number.
+    # Buckets chosen from the Task 0.6 vault-wide frontmatter measurement
+    # (tests/manual/day79_02_task0_frontmatter_length_distribution.md): long-text
+    # narrative fields reached 1,734 chars observed max; short identifier/category
+    # fields never approach the 250 default. LONG matches the Task 2.2 interim global
+    # value so these fields are never worse off than the global mitigation; MEDIUM and
+    # SHORT give real headroom without opening the meta-reasoning-leak hole for every
+    # property (Rev 5 Sec.3's stated risk of raising the cap globally).
+    #
+    # Day80.01 Rev 1 §6 decision: SHORT (the unmatched-name fallback bucket) raised
+    # 250 -> 500. Task 1's heuristic-vs-measured run against Bjorn's full ontology
+    # flagged 3 live-drop-risk properties (related_devdocs 331, title 275, url 315),
+    # all three falling through to this fallback rather than matching a name pattern.
+    # A single bucket change fixes all three plus any future unrecognised property
+    # name, which three targeted per-property overrides would not. 250 was upstream's
+    # guess at LLM rambling; authored frontmatter is a different distribution. 500
+    # still catches a runaway paragraph, and the 2000 env var remains as backstop.
+    _MAX_LENGTH_LONG_TEXT = 2000
+    _MAX_LENGTH_MEDIUM_TEXT = 500
+    _MAX_LENGTH_SHORT_TEXT = 500
+
+    # Substrings matched against the property name (case-insensitive, snake_case or
+    # camelCase) to classify it. Order matters — long-text patterns are checked first
+    # so e.g. "meeting_notes" doesn't fall through to a short-field match on "meeting".
+    _LONG_TEXT_NAME_PATTERNS = (
+        'about', 'summary', 'notes', 'description', 'story', 'context', 'overview',
+        'content', 'bio', 'abstract', 'needs', 'offers', 'details',
+    )
+    _MEDIUM_TEXT_NAME_PATTERNS = (
+        'address', 'jobtitle', 'job_title', 'orgtype', 'org_type', 'identity_type',
+        'category', 'coverage', 'authority', 'responsibilities',
+    )
+
+    def _infer_max_length_for_property(self, property_name: str) -> int:
+        """Classify a property name into a max_length bucket. See class-level
+        constants above for the rationale behind each bucket's value."""
+        name_lower = property_name.lower()
+        if any(pattern in name_lower for pattern in self._LONG_TEXT_NAME_PATTERNS):
+            return self._MAX_LENGTH_LONG_TEXT
+        if any(pattern in name_lower for pattern in self._MEDIUM_TEXT_NAME_PATTERNS):
+            return self._MAX_LENGTH_MEDIUM_TEXT
+        return self._MAX_LENGTH_SHORT_TEXT
+
+    def _resolve_property_max_length(self, property_name: str, field_type: str,
+                                      prop_info: Dict[str, Any]) -> Optional[int]:
+        """Resolve the effective max_length for a property: explicit ontology
+        override (`maxLength`, once set via the Ontology Manager UI) wins; otherwise
+        fall back to the name-based heuristic default. Returns None for field types
+        the cap doesn't apply to.
+        """
+        if field_type not in ('str', 'List[str]'):
+            return None
+        explicit = prop_info.get('maxLength')
+        if isinstance(explicit, (int, float)) and explicit > 0:
+            return int(explicit)
+        return self._infer_max_length_for_property(property_name)
 
     def _get_standard_entity_fields(self, entity_name: str) -> Dict[str, tuple]:
         """Get standard field definitions for each entity type to match reference format"""

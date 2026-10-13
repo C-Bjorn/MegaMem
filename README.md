@@ -4,7 +4,7 @@
 
 MegaMem is an Obsidian plugin that syncs your notes into a **temporal knowledge graph** (powered by [Graphiti](https://github.com/getzep/graphiti)) and exposes it to AI assistants through the **Model Context Protocol (MCP)**. Claude, and any other MCP-compatible client, can read, search, and write to your vault — and remember things across conversations.
 
-[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
+[![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)](https://github.com/C-Bjorn/megamem-mcp/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.12.4+-blueviolet.svg)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
@@ -24,9 +24,9 @@ The plugin scans your vault's frontmatter and automatically infers entity types,
 
 Configure multiple named graph databases simultaneously — each with its own connection, type (Neo4j/FalkorDB), and embedding model. A **masterVault** runs the MCP server and manages all databases across all registered vaults. Tell Claude which database to query, or let it discover available databases with `list_databases`.
 
-### 🤖 23 MCP Tools for AI Assistants
+### 🤖 24 MCP Tools for AI Assistants
 
-A full MCP server (12 graph tools + 11 vault file tools) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
+A full MCP server (12 graph tools + 11 vault file tools, plus the Pro-gated `ask_bjorn` support tool) gives Claude — or any MCP client — direct, structured access to your knowledge. Search memories, add episodes, read and write notes, explore folders, all from your AI conversation.
 
 ### 🏗️ Custom Ontology Manager
 
@@ -34,7 +34,7 @@ Define your own entity types, edge types, and property descriptions. Generate Py
 
 ### ⚡ Obsidian CLI Integration
 
-All 10 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter. Non-markdown files (`.pdf`, `.png`, `.csv`, `.base`, etc.) are now fully supported across all file tools.
+All 11 file operation tools run through the native **Obsidian CLI** (v1.12+) — stateless subprocess calls with no persistent WebSocket, no connection race conditions, no heartbeat. Multi-vault support via a single `vault_id` parameter. Non-markdown files (`.pdf`, `.png`, `.csv`, `.base`, etc.) are now fully supported across all file tools.
 
 ### 🌐 Streamable HTTP MCP Transport _(new in v1.4.0)_
 
@@ -50,7 +50,19 @@ The unified **MegaMem panel** (brain icon, copper accent) combines Ontology, Syn
 
 ### ✦ MegaMem Pro _(new)_
 
-A dedicated **Pro tab** in plugin settings for licensed Stewards. Validate your API key, check and install content packages (vault templates, ontology packs), and access upcoming hosted services — all in-plugin. Free plan users keep all MCP tools; Pro is content delivery and future hosted features.
+A dedicated **Pro tab** in plugin settings for licensed Stewards. Validate your API key, check and install content packages (vault templates, ontology packs), add an **Endogon Hosted Graph** in one click (Hosted Graph section), and unlock the `ask_bjorn` MCP tool — all in-plugin. Free plan users keep all graph and vault MCP tools.
+
+### 📤 Publish — Scoped Graph Replication _(new in v1.8.0)_
+
+The **Publish** tab replicates a chosen `group_id` namespace from one of your graphs into a separate destination database (for example a hosted Neo4j Aura instance), so you or a website assistant can query a curated slice without exposing your private notes or your machine. Two-pass write with reconciliation, embedder-parity checks, and preflight refusal codes. See the [Publishing guide](https://c-bjorn.github.io/MegaMem/#/publishing).
+
+### 🧩 Dynamic Ontology Rules _(new in v1.8.0)_
+
+The **Dynamic Rules** tab in Schema Manager lets you scope which entity and edge types are sent to extraction per note type. Rules live in `dynamic-rules.json` and filter the schema before each `add_episode`; a default catch-all rule keeps behaviour unchanged until you add rules.
+
+### 🔐 FalkorDB TLS _(new in v1.8.0)_
+
+FalkorDB databases support TLS (`ssl`) with a single URL/host input, so hosted FalkorDB instances can be used directly.
 
 ---
 
@@ -66,7 +78,7 @@ MegaMem is **stable in daily production use** and currently in public beta. We'r
 
 ## 🛠️ MCP Tools Reference
 
-All 23 tools are available to Claude Desktop and any MCP-compatible client.
+All 24 tools are available to Claude Desktop and any MCP-compatible client (`ask_bjorn` only appears when a Pro key with the Ask Bjørn capability is configured).
 
 ### Graph Operations (12)
 
@@ -76,14 +88,20 @@ All 23 tools are available to Claude Desktop and any MCP-compatible client.
 | `add_conversation_memory` | Store a conversation as a structured memory episode                         |
 | `search_memory_nodes`     | Semantic search for entity nodes in the graph (`database_id` optional)      |
 | `search_memory_facts`     | Search for relationships and facts between entities (`database_id` optional) |
-| `get_episodes`            | Retrieve the most recent N episodes from a group                            |
-| `get_entity_edge`         | Get relationships for a specific entity by name                             |
-| `delete_entity_edge`      | Remove a specific relationship edge by UUID                                 |
-| `delete_episode`          | Remove a specific episode by ID                                             |
+| `get_episodes`            | Retrieve the most recent N episodes from a group (`database_id` optional)   |
+| `get_entity_edge`         | Get relationships for a specific entity by name (`database_id` optional)    |
+| `delete_entity_edge`      | Remove a specific relationship edge by UUID (`database_id` optional)        |
+| `delete_episode`          | Remove a specific episode by ID (`database_id` optional)                    |
 | `list_group_ids`          | List all group IDs (namespaces) in the vault                                |
 | `list_databases`          | List all configured database targets — use before routing with `database_id` |
 | `clear_graph`             | Clear the entire memory graph (use with caution)                            |
 | `manage_sagas`            | List all sagas (`operation: "list"`) or summarize a saga (`operation: "summarize"`) |
+
+### Support (1, Pro)
+
+| Tool         | Description                                                                                          |
+| ------------ | ---------------------------------------------------------------------------------------------------- |
+| `ask_bjorn`  | Ask Bjørn, Endogon's support agent, about MegaMem/Endogon (not your vault). Needs a Pro key with the `service.ask_bjorn` capability; unmetered |
 
 ### Obsidian File Operations (11) — via Obsidian CLI
 
@@ -101,9 +119,9 @@ All 23 tools are available to Claude Desktop and any MCP-compatible client.
 | `manage_obsidian_folders`   | Create, rename, or delete vault folders                                             |
 | `manage_obsidian_notes`     | Delete, rename/move, copy, or cross-vault copy/move notes (`copy_to_vault`/`move_to_vault`) |
 | `manage_obsidian_base`      | Manage Obsidian Bases `.base` files — operations: `list`, `views`, `query`, `create` |
-| `sync_obsidian_note`        | Sync a specific vault note to the graph on demand                                   |
+| `sync_obsidian_note`        | Sync a specific vault note to the graph on demand (`database_id` optional to target a specific database) |
 
-> Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — Updated for v1.5 with `database_id` routing on all graph tools.
+> Full parameter reference: [docs/mcp-commands.md](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — `database_id` routing is available on all graph tools and `sync_obsidian_note`.
 
 ---
 
@@ -174,7 +192,9 @@ Run the Obsidian 1.12.4+ installer → `Settings → General → CLI → Registe
 [Neo4j Desktop](https://neo4j.com/download/) (recommended) or FalkorDB via Docker. See [Database Setup Guide](https://c-bjorn.github.io/MegaMem/#/guides/database-setup).
 
 **Step 2 — Install Python dependencies**
-Plugin Settings → Python Environment → **"Install Dependencies"** (uses UV by default — works on macOS/Windows/Linux).
+Plugin Settings → Python Environment → **"Install Dependencies"** (uses UV by default — works on macOS/Windows/Linux). Dependencies are pinned (`graphiti-core` 0.29.3, `mcp>=1.28,<2`) and a dependency health readout shows what is installed; **after upgrading to v1.8.0, click "Install Dependencies" again.**
+
+> ⚠️ **Windows:** Defender scanning a freshly created venv can exceed the MCP handshake window on first launch. If the MCP server fails to start, restart your MCP client once; consider adding a Defender exclusion for the plugin's venv folder.
 
 **Step 3 — Configure LLM provider**
 Plugin Settings → API Keys → enter your key. Click **"Load Defaults"** to populate recommended models.
@@ -208,7 +228,7 @@ Build a graph of the people, projects, ideas, and relationships in your life. As
 
 ### AI-Assisted Note-Taking
 
-With 9 native Obsidian file tools, Claude can create, search, and update notes directly in your vault mid-conversation. Draft a meeting note, file it in the right folder, sync it to the graph — all in one step, without leaving the chat.
+With 11 native Obsidian file tools, Claude can create, search, and update notes directly in your vault mid-conversation. Draft a meeting note, file it in the right folder, sync it to the graph — all in one step, without leaving the chat.
 
 _Also great for:_ research & academia (literature graphs, citation tracking), business intelligence (competitor research, knowledge bases), creative projects (world-building, character arcs), and multi-team knowledge management with namespaced vaults.
 
@@ -231,7 +251,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 ### Reference
 
-- [MCP Commands](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — All 19 tools with full parameter reference
+- [MCP Commands](https://c-bjorn.github.io/MegaMem/#/mcp-commands) — All 24 tools with full parameter reference
 - [FAQ](https://c-bjorn.github.io/MegaMem/#/faq) — Common questions answered
 
 ---
@@ -250,6 +270,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 ### Shipped ✅
 
 - **Native Template Engine** — `create_note_with_template` resolves templates from an ordered list of configured source vaults/folders (personal + company precedence) and renders the honest `<% %>` subset natively — no Templater dependency required in the target vault; works headless for agent/client vaults. Registry-aware candidate matching returns a ranked, enriched `candidates` list (with `whenToUse`/`category`) when no confident match exists, discovered via filter-introspection against `.base` files rather than a fixed folder-adjacency convention. Templater interop guard auto-manages the "ignore folders on creation" list to prevent template-syntax corruption. CLI transport only; WebSocket path unaffected _(v1.7.5)_
+- **Publish, Dynamic Ontology Rules, FalkorDB TLS, Endogon Hosted Graph, `ask_bjorn`** — graph replication to Neo4j Aura; per-note-type ontology filtering; TLS for FalkorDB; one-click hosted graph for Pro members; Pro-gated support tool; real FalkorDB namespace isolation; pinned dependencies _(v1.8.0)_
 - **OpenRouter Embedding Models** — Model Library → Embedding Models now fetches live catalog from `/api/v1/embeddings/models` (25 embedded seeds available without API key); Multimodal/Free/ZDR filter bar; Python bridge supports `embedder_provider: openrouter` _(v1.6.9)_
 - **Template Scaffold Return** — `create_note_with_template` returns `content` + `instructions` in response; 2-call workflow (create → update, no read needed) _(v1.6.9)_
 - **Analytics: Embed Cost + Timeline Toggles** — Embed cost tracked per sync (content_length/4 × embedder pricing); Embed Cost column + Embed Model in Synced Notes detail; Sync Timeline right-axis toggle: Entities | Edges | LLM Cost _(v1.6.9)_
@@ -258,7 +279,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 - **Multi-database support** — multiple named Neo4j/FalkorDB targets, per-DB embedding config, sync dropdown per note _(v1.5)_
 - **Multi-vault architecture** — masterVault control panel, childVault registration, MCP `database_id` routing, `list_databases` tool _(v1.5)_
 - Temporal knowledge graph sync (Graphiti + Neo4j/FalkorDB)
-- 22 MCP tools — 11 graph operations + 11 Obsidian file tools (including `manage_obsidian_base` for `.base` files)
+- 24 MCP tools — 12 graph operations + 11 Obsidian file tools (including `manage_obsidian_base` for `.base` files) + Pro-gated `ask_bjorn`
 - Obsidian CLI integration (stateless, multi-vault, no WebSocket)
 - Auto schema discovery from vault frontmatter
 - Custom ontology manager with Pydantic model generation
@@ -287,7 +308,7 @@ _Also great for:_ research & academia (literature graphs, citation tracking), bu
 
 MegaMem embraces **progressive formalization**: start with plain notes, let patterns emerge naturally, then add structure as your knowledge matures. The graph enriches your vault — it doesn't replace the way you write.
 
-> _Gate services, not tools._ All 20 MCP tools are free. Forever.
+> _Gate services, not tools._ All graph and vault MCP tools are free. Forever.
 
 ---
 

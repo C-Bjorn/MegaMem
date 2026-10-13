@@ -108,7 +108,6 @@ def log_timing_summary():
                     f"{PERF_TIMING_PREFIX}   {op['operation']}: {op['duration_ms']:.2f}ms ({percentage:.1f}%)", file=sys.stderr)
 
 
-# Import config helpers (conforms with sync.py usage)
 with time_operation("config_import", "imports"):
     from .config import BridgeConfig, setup_environment_variables
 
@@ -116,6 +115,16 @@ with time_operation("config_import", "imports"):
 # Note: This will trigger granular import timing from sync.py when GRAPHITI_LOG_PERFORMANCE=true
 with time_operation("sync_module_import", "imports"):
     from . import sync  # graphiti_bridge/sync.py
+
+# Day79.02 Task 2.1/2.2 — same attribute-cap drop capture + env verification the
+# single-shot sync.py main() installs. Installed once at daemon startup (the daemon
+# reuses this interpreter across many notes); the handler is cleared per-note in
+# _run_single_note() below.
+from .utils import (
+    install_attribute_cap_capture,
+    summarize_attribute_cap_drops,
+    verify_attribute_cap_env_effect,
+)
 
 # Minimal logger per Day27.01_Python-Logging-Refactor (stderr only)
 logger = logging.getLogger("graphiti_bridge.sync_daemon")
@@ -125,6 +134,8 @@ if not logger.handlers:
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+_ATTR_CAP_HANDLER = install_attribute_cap_capture()
 
 # Suppress noisy HF/Transformers warnings to keep protocol-clean logs
 # - FutureWarning for TRANSFORMERS_CACHE deprecation
@@ -184,6 +195,10 @@ class SyncDaemon:
             # Use sync logger namespace expected by process_note
             py_logger = logging.getLogger("graphiti_bridge.sync")
 
+            # Day79.02 Task 2.1 — clear drops captured by any prior note (daemon
+            # reuses this interpreter/handler across notes).
+            _ATTR_CAP_HANDLER.clear()
+
             try:
                 result = await sync.process_note(cfg.notes[0], graphiti, py_logger, cfg)
             finally:
@@ -197,6 +212,8 @@ class SyncDaemon:
             if result is None:
                 return self._build_result_error("No result generated")
             # result is already a compact dict from sync.process_note
+            if isinstance(result, dict):
+                result['dropped_attributes'] = summarize_attribute_cap_drops(_ATTR_CAP_HANDLER)
             return result
         except Exception as e:
             logger.error(f"[DAEMON] Sync pipeline error: {e}")
@@ -238,6 +255,16 @@ class SyncDaemon:
             setup_environment_variables(cfg)
         except Exception as e:
             return self._build_result_error(f"Failed to setup environment variables: {e}")
+
+        # Day79.02 Task 2.2 — verify the GRAPHITI_ATTRIBUTE_MAX_LENGTH interim
+        # mitigation took effect (daemon mode: called once per sync request, same
+        # as sync.py's main() does once per process).
+        attr_cap_env_check = verify_attribute_cap_env_effect()
+        if attr_cap_env_check.get('took_effect'):
+            logger.debug(
+                f"attribute_cap_env_verified effective_max_length={attr_cap_env_check.get('effective_max_length')}")
+        else:
+            logger.warning(f"attribute_cap_env_not_verified {attr_cap_env_check}")
 
         try:
             # Non-ASCII entity names (e.g. Japanese) can still cause a silent sync failure

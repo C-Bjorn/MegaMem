@@ -115,6 +115,7 @@ Complete parameter reference for all MegaMem MCP tools. Load this file when you 
 | `source_description` | No | |
 | `group_id` | No | Leave blank = default |
 | `uuid` | No | |
+| `namespace` | No | DEPRECATED — use `group_id` |
 | `database_id` | No | Leave blank = default |
 
 ### `add_conversation_memory`
@@ -195,7 +196,10 @@ No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as 
 `list` returns all sagas with `uuid`, `name`, `group_id`, `summary`, `episode_count`, `last_summarized_at`. `summarize` incrementally summarizes a saga using only new episodes since the last summary.
 
 ### `clear_graph`
-⚠️ Destructive — always confirm first. No parameters.
+⚠️ Destructive — always confirm first.
+| Param | Required | Notes |
+|---|---|---|
+| `database_id` | No | Target a specific named database (id or label from Databases settings); defaults to the connected/default database |
 
 ---
 
@@ -261,6 +265,7 @@ No parameters. Returns `id`, `label`, `category`, `type` per entry. Use `id` as 
 |---|---|---|
 | `path` | Yes | Vault-relative only. No absolute paths. No vault folder prefix. |
 | `vault_id` | No | |
+| `database_id` | No | Target a specific configured database (settings.databases[].id) via the plugin's RPC bridge instead of the default command-by-ID sync. Unrecognized IDs fail with a named error rather than silently syncing to the default database. |
 
 Obsidian must be running with MegaMem active. Sync is asynchronous. This is NOT `add_memory`.
 
@@ -318,7 +323,18 @@ Tag filter syntax: `file.tags.containsAny("tagname")`
 | `vault_id` | No | |
 
 ### `list_obsidian_vaults`
-No parameters."""
+No parameters.
+
+---
+
+## Support Tool
+
+### `ask_bjorn`
+| Param | Required | Notes |
+|---|---|---|
+| `question` | Yes | Question about MegaMem, Endogon, or the product — NOT about vault or graph data |
+
+Only registered when a valid Endogon Pro key is configured and its capabilities include `service.ask_bjorn`; otherwise the tool is absent from the tool list. Runs a full autonomous agent turn (may search roadmap/product/FAQ records, submit a roadmap item, or leave a message for the team). Unmetered."""
 
 # --- Graphiti Core Imports ---
 try:
@@ -362,6 +378,23 @@ try:
 except ImportError as e:
     logging.critical(f"FATAL: Could not import graphiti_bridge modules: {e}")
     sys.exit(1)
+
+# Endogon Pro service client (ask_bjorn) — optional. A missing/broken import here
+# only means the ask_bjorn tool won't be registered; it must never take down the
+# rest of the server (Day85.01).
+try:
+    from graphiti_bridge.endogon_client import (
+        EndogonClient,
+        EndogonError,
+        mask_key as _mask_endogon_key,
+        ASK_BJORN_CAPABILITY,
+    )
+except ImportError as e:
+    logging.warning(f"Endogon client unavailable, ask_bjorn tool will not be registered: {e}")
+    EndogonClient = None  # type: ignore
+    EndogonError = Exception  # type: ignore
+    _mask_endogon_key = lambda k: "****"  # type: ignore
+    ASK_BJORN_CAPABILITY = "service.ask_bjorn"
 
 # Remote RPC bridge import
 try:
@@ -461,14 +494,73 @@ def _get_available_templates(vault_path: str) -> str:
         return "Available templates: scan unavailable — use TPL + type name (e.g. TPL Person, TPL Note, TPL Meeting)"
 
 
+# --- MCP SDK version guard (Day83.01) ---
+# @purpose: Fail loudly, before any tool-handler registration, if the installed `mcp`
+# SDK falls outside the range this server's decorator-based API depends on
+# @depends: importlib.metadata, the mcp>=1.28,<2 pin in mcp-server/requirements.txt
+# @results: One actionable stderr line naming the found version, the required range, and
+# the exact repair command for the running interpreter, then a non-zero exit - instead of
+# an AttributeError traceback deep inside _register_tool_handlers()
+_MCP_MIN_VERSION = (1, 28)
+_MCP_MAX_VERSION = (2, 0)  # exclusive ceiling
+_MCP_REPAIR_SPEC = "mcp>=1.28,<2"
+
+
+def _parse_version_tuple(version_str: str) -> tuple:
+    """Parse a dotted version string (e.g. '1.29.0') into a tuple of its leading
+    integer components, stopping at the first non-numeric segment (e.g. pre-release
+    suffixes like '2.0.0rc1' compare as (2, 0, 0), which is intentionally >= (2, 0))."""
+    parts = []
+    for segment in version_str.split('.'):
+        digits = ''
+        for ch in segment:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _check_mcp_sdk_version() -> None:
+    """mcp 2.0.0 (stable, 2026-07-28) removed the pre-2.0 decorator registration API
+    (@self.server.list_tools() / .call_tool()) that _register_tool_handlers() depends
+    on. The requirements.txt pin (mcp>=1.28,<2) should prevent this at install time, but
+    a stale venv, a manually-edited environment, or a package manager that ignores the
+    pin can still land here. This guard fails before registration runs, with one
+    actionable line for the exact interpreter in use - no fallback, no retry, no partial
+    registration."""
+    import importlib.metadata
+    repair_cmd = f'"{sys.executable}" -m pip install --upgrade --force-reinstall "{_MCP_REPAIR_SPEC}"'
+    try:
+        installed = importlib.metadata.version('mcp')
+    except importlib.metadata.PackageNotFoundError:
+        sys.stderr.write(
+            f"FATAL: Python package 'mcp' is not installed. Run: {repair_cmd}\n"
+        )
+        sys.exit(1)
+
+    installed_tuple = _parse_version_tuple(installed)
+    if installed_tuple < _MCP_MIN_VERSION or installed_tuple >= _MCP_MAX_VERSION:
+        sys.stderr.write(
+            f"FATAL: mcp SDK version {installed} is outside the supported range "
+            f">=1.28,<2.0.0 (mcp 2.0.0 removed the decorator API this server's tool "
+            f"registration depends on). Run: {repair_cmd}\n"
+        )
+        sys.exit(1)
+
+
 # --- Complete MCP Server Implementation ---
 
 
 class ObsidianMegaMemMCPServer:
     """
-    Complete MCP server providing 18 tools:
-    - 9 Graphiti graph operations (including conversation memory)
-    - 9 Obsidian file operations via WebSocket
+    Complete MCP server providing up to 24 tools:
+    - 12 Graphiti graph operations (including conversation memory)
+    - 11 Obsidian vault operations via WebSocket
+    - ask_bjorn (only registered when the Pro entitlement gate passes)
     """
 
     def __init__(self):
@@ -500,6 +592,16 @@ class ObsidianMegaMemMCPServer:
         # @purpose: Token profiles for HTTP transport gating @depends: httpTokenProfiles in data.json @results: Per-token access control
         self.http_token_profiles: List[Dict] = []
 
+        # @purpose: Endogon Pro service client (ask_bjorn entitlement gate + agent
+        # calls) @depends: graphiti_bridge.endogon_client.EndogonClient @results:
+        # ask_bjorn is gated by proApiKey + validate-api-key, cached with a 5-min TTL
+        self.endogon_client = EndogonClient() if EndogonClient else None
+
+        # Day83.01: fail loudly before registration if the installed mcp SDK is
+        # outside the supported range, instead of an AttributeError deep inside
+        # _register_tool_handlers() on an incompatible v2.x SDK.
+        _check_mcp_sdk_version()
+
         # Register all tool handlers
         self._register_tool_handlers()
 
@@ -512,6 +614,11 @@ class ObsidianMegaMemMCPServer:
             tools = []
             tools.extend(self._get_megamem_tool_definitions())
             tools.extend(self._get_obsidian_tool_definitions())
+            # Day85.01: Endogon tools (ask_bjorn) are entitlement-gated and must be
+            # appended BEFORE the Day54.01 allowed_tools filter below, so that filter
+            # still composes correctly on top (an HTTP token profile can still exclude
+            # ask_bjorn even when the Pro entitlement gate passes).
+            tools.extend(await self._get_endogon_tool_definitions())
 
             profile = current_token_profile.get()
             if profile and profile.allowed_tools:
@@ -575,6 +682,8 @@ class ObsidianMegaMemMCPServer:
             try:
                 if name in OBSIDIAN_FILE_OPERATIONS:
                     return await self._handle_obsidian_tool(name, arguments)
+                elif name == "ask_bjorn":
+                    return await self._handle_ask_bjorn_tool(name, arguments)
                 else:
                     return await self._handle_graphiti_tool(name, arguments)
             except Exception as e:
@@ -738,7 +847,15 @@ class ObsidianMegaMemMCPServer:
             Tool(
                 name="clear_graph",
                 description="Clear the entire memory graph (aliases: mm, megamem, memory)",
-                inputSchema={"type": "object", "properties": {}}
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "database_id": {
+                            "type": "string",
+                            "description": "Optional: target a specific named database (id or label from Databases settings)"
+                        }
+                    }
+                }
             ),
             Tool(
                 name="get_entity_edge",
@@ -1070,12 +1187,13 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
             ),
             Tool(
                 name="sync_obsidian_note",
-                description="Sync a specific note to the graph by path. Opens the note and triggers the registered sync command. Use only on-demand when user requests sync after updating a note. Sync completes asynchronously after this tool returns.",
+                description="Sync a specific note to the graph by path. Opens the note and triggers the registered sync command. Use only on-demand when user requests sync after updating a note. Sync completes asynchronously after this tool returns. Pass database_id to target a specific configured database via the plugin's RPC bridge instead of the default database.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Vault-relative path to the note (e.g. 'My Notes/SomeNote.md'). Do NOT use absolute system paths or prefix with the vault folder name."},
-                        "vault_id": {"type": "string", "description": "Vault ID (optional)"}
+                        "vault_id": {"type": "string", "description": "Vault ID (optional)"},
+                        "database_id": {"type": "string", "description": "Optional: target a specific configured database (settings.databases[].id) via the plugin's RPC bridge. If unrecognized, fails with a named error rather than falling back to the default database."}
                     },
                     "required": ["path"]
                 }
@@ -1531,7 +1649,13 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
                     }))]
 
             elif name == "clear_graph":
-                await self.megamem_client.close()
+                # Day86.04 Task 4: routes through _get_graphiti_client(database_id) like
+                # every other graph tool, instead of unconditionally closing the default
+                # client -- closes the gap found in the full database_id/group_id audit
+                # of all MegaMem graph tools.
+                database_id = arguments.get('database_id')
+                client = await self._get_graphiti_client(database_id)
+                await client.close()
                 return [types.TextContent(type="text", text=json.dumps({
                     "success": True,
                     "message": "Graph cleared successfully"
@@ -1935,7 +2059,7 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
     async def initialize(self):
         """Initialize both Graphiti client and WebSocket server with discovery and fallback"""
         logger.info(
-            "[START] Initializing Obsidian MegaMem MCP Server with 18 tools...")
+            "[START] Initializing Obsidian MegaMem MCP Server with up to 24 tools...")
 
         try:
             config_path = os.environ.get('OBSIDIAN_CONFIG_PATH')
@@ -2036,7 +2160,7 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
             logger.info(
                 f"[COMPLETE] MCP Server ready! WebSocket: {websocket_status} | MegaMem: Loading in background")
             logger.info(
-                "[INFO] All 19 tools available: 9 Graphiti + 10 Obsidian")
+                "[INFO] Tools available: 12 Graphiti + 11 Obsidian (+ ask_bjorn when entitled)")
 
         except Exception as e:
             logger.critical(
@@ -2620,6 +2744,120 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
         with open(config_path, 'r', encoding='utf-8') as f:
             return json.load(f)
 
+    def _get_pro_api_key(self) -> str:
+        """Read `proApiKey` from the plugin's data.json (Day85.01). Returns an
+        empty string if no OBSIDIAN_CONFIG_PATH is set, the file can't be read,
+        or the key simply isn't configured — never raises, since an absent key
+        just means Endogon tools are omitted from list_tools(), not an error."""
+        try:
+            obsidian_config = self._load_obsidian_config()
+        except Exception:
+            return ""
+        return obsidian_config.get("proApiKey", "") or ""
+
+    async def _get_endogon_tool_definitions(self) -> List[Tool]:
+        """Return [ask_bjorn Tool] only when a Pro key is configured AND
+        validate_key confirms valid=True with 'service.ask_bjorn' present in
+        capabilities. Fails closed (returns []) on any error — Endogon tools
+        must never appear in the tool list when the gate can't be confirmed
+        (Day85.01: "should not appear in the tool list at all when no key is
+        configured")."""
+        if not self.endogon_client:
+            return []
+
+        key = self._get_pro_api_key()
+        if not key:
+            return []
+
+        try:
+            validation = await self.endogon_client.validate_key(key)
+        except Exception as e:
+            logger.info(f"ask_bjorn gate: validate_key failed ({e}), omitting tool")
+            return []
+
+        if not validation.get("valid"):
+            return []
+        if ASK_BJORN_CAPABILITY not in (validation.get("capabilities") or []):
+            return []
+
+        return [
+            Tool(
+                name="ask_bjorn",
+                description=(
+                    "Ask Bjorn, Endogon's autonomous support agent, a question about "
+                    "MegaMem, Endogon, or the product itself — NOT the member's own "
+                    "Obsidian vault or graph data. This is a full autonomous agent "
+                    "turn, not a simple retrieval call: Bjorn may search Endogon's "
+                    "roadmap/product/FAQ records, submit a roadmap item on the "
+                    "member's behalf, or leave a message for the team before "
+                    "answering. Requires an Endogon Pro membership with Ask Bjorn "
+                    "access; always unmetered (free) to call."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask Bjorn about MegaMem, Endogon, or the product",
+                        }
+                    },
+                    "required": ["question"],
+                },
+            )
+        ]
+
+    async def _handle_ask_bjorn_tool(self, name: str, arguments: Dict) -> List[types.TextContent]:
+        """Route for the ask_bjorn tool (Day85.01). Re-resolves the Pro key from
+        the plugin config on every call, calls EndogonClient.ask_bjorn, and
+        translates any named EndogonError into the same
+        {"success": False, "error": ...} shape every other tool handler uses —
+        with the specific human-readable message, never a raw stringified
+        exception or HTTP status."""
+        question = (arguments or {}).get("question")
+        if not question:
+            return [types.TextContent(type="text", text=json.dumps({
+                "success": False,
+                "error": "question is required"
+            }))]
+
+        if not self.endogon_client:
+            return [types.TextContent(type="text", text=json.dumps({
+                "success": False,
+                "error": "Ask Bjorn is unavailable on this server (Endogon client failed to load)."
+            }))]
+
+        key = self._get_pro_api_key()
+        if not key:
+            return [types.TextContent(type="text", text=json.dumps({
+                "success": False,
+                "error": "No Endogon Pro key is configured. Add your key in Pro settings."
+            }))]
+
+        try:
+            result = await self.endogon_client.ask_bjorn(key, question)
+        except EndogonError as e:
+            logger.info(f"ask_bjorn error for key {_mask_endogon_key(key)}: {e.code}")
+            return [types.TextContent(type="text", text=json.dumps({
+                "success": False,
+                "error": e.message,
+                "code": e.code,
+            }))]
+        except Exception as e:
+            logger.error(f"ask_bjorn unexpected error: {e}", exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({
+                "success": False,
+                "error": "Ask Bjorn is temporarily unavailable. Try again shortly."
+            }))]
+
+        return [types.TextContent(type="text", text=json.dumps({
+            "success": True,
+            "answer": result.get("answer", ""),
+            "conversation_id": result.get("conversation_id"),
+            "tools_used": result.get("tools_used", []),
+            "writes": result.get("writes", []),
+            "truncated": result.get("truncated", False),
+        }, indent=2))]
+
     def _resolve_database_config(self, database_id: str, obsidian_config: Dict) -> Optional[Dict]:
         """Find a named DbConfig from databases[] by id or label (case-insensitive label match)
         @purpose: Multi-DB routing — maps user-friendly database_id to connection config"""
@@ -2636,38 +2874,82 @@ WORKFLOW: 1) create 2) populate all frontmatter + sections via update_obsidian_n
         return None
 
     def _create_bridge_config_for_db(self, db_config: Dict, obsidian_config: Dict) -> 'BridgeConfig':
-        """Build a BridgeConfig from a named DbConfig entry (for per-DB client creation)"""
+        """Build a BridgeConfig from a named DbConfig entry (for per-DB client creation).
+
+        Day86.04 Task 2: routes through BridgeConfig.from_dict(config_dict, db_entry=db_config)
+        instead of hand-constructing BridgeConfig(...) field-by-field (the now-deleted
+        call this docstring used to sit above). That parallel construction path silently
+        dropped database_ssl -- and ~20 other optional fields from_dict() already knows
+        about (namespace_strategy, dynamic_rules, ollama_num_ctx, episode_contributor,
+        etc.) -- for every named database target, always taking the dataclass default
+        instead of the value this database actually has configured. config_dict is built
+        the same way _create_bridge_config() already does (dict(obsidian_config) plus
+        targeted overrides); db_entry=db_config pins every database- and embedder-scoped
+        resolver inside from_dict() (Day86.04 Task 1) to this specific database rather
+        than whichever databases[] entry _get_primary_database_entry() would pick.
+        """
         config_path = os.environ.get('OBSIDIAN_CONFIG_PATH', '')
         db_type = db_config.get('type', 'neo4j')
 
         if db_type == 'neo4j':
             database_url = db_config.get('uri', 'bolt://localhost:7687')
         else:
+            # Day79.02 Task 4 fix: this branch previously hardcoded 'bolt://' for
+            # every non-neo4j database, including FalkorDB. graphiti_bridge/sync.py's
+            # FalkorDB driver construction parses the URL with a `redis://host:port`
+            # regex - a 'bolt://' URL never matched, so the parse silently fell
+            # through to its hardcoded default (localhost:6379), ignoring whatever
+            # host/port was actually configured for this named database entry.
+            # 'redis://' matches both sync.py's regex and the scheme GraphitiService.ts
+            # writes for the primary single-database FalkorDB config path.
             host = db_config.get('host', 'localhost')
             port = db_config.get('port', 6379)
-            database_url = f'bolt://{host}:{port}'
+            database_url = f'redis://{host}:{port}'
 
-        # Embedding: per-DB override → global fallback
-        embed_provider = db_config.get('embedderProvider') or obsidian_config.get('embedderProvider', 'openai')
-        embed_model = db_config.get('embeddingModel') or obsidian_config.get('embeddingModel', 'text-embedding-3-small')
+        # Embedding: routed through BridgeConfig's single resolver (Day83.02) so this
+        # per-DB path and the no-database_id default path (_create_bridge_config ->
+        # BridgeConfig.from_dict) can never disagree on which provider a call resolves
+        # to. db_entry=db_config pins resolution to THIS named database rather than
+        # whichever databases[] entry _get_primary_database_entry would pick. Resolved
+        # here, ahead of the from_dict() call below, only so an unconfigured embedder
+        # fails loudly with this database's name before a connection is attempted;
+        # from_dict() re-resolves identically via the same db_entry override.
+        embed_provider = BridgeConfig._get_embedder_field(
+            obsidian_config, 'embedder_provider', 'embedderProvider', db_entry=db_config)
+        embed_model = BridgeConfig._get_embedder_field(
+            obsidian_config, 'embedding_model', 'embeddingModel', db_entry=db_config)
+        if not embed_provider or not embed_model:
+            db_name = db_config.get('label') or db_config.get('id') or 'this database'
+            missing = 'embedderProvider' if not embed_provider else 'embeddingModel'
+            raise ValueError(
+                f"{missing} is not configured for database '{db_name}'. Set it in "
+                f"Plugin Settings -> Databases before running graph operations."
+            )
 
-        return BridgeConfig(
-            llm_provider=obsidian_config.get('llmProvider', 'openai'),
-            llm_model=obsidian_config.get('llmModel', 'gpt-4o'),
-            embedder_provider=embed_provider,
-            embedding_model=embed_model,
-            database_type=db_type,
-            database_url=database_url,
-            database_username=db_config.get('username'),
-            database_password=db_config.get('password'),
-            database_name=db_config.get('database', 'neo4j'),
-            default_namespace=obsidian_config.get('defaultNamespace', 'default'),
-            use_custom_ontology=obsidian_config.get('useCustomOntology', False),
-            api_keys=obsidian_config.get('apiKeys', {}),
-            models_path=str(Path(config_path).parent) if config_path else '',
-            notes=[],
-            debug=False
-        )
+        config_dict = dict(obsidian_config)
+        config_dict['database_type'] = db_type
+        config_dict['database_url'] = database_url
+        config_dict['database_username'] = db_config.get('username')
+        config_dict['database_password'] = db_config.get('password')
+        config_dict['database_name'] = db_config.get('database', 'neo4j')
+        # Day86.04 Task 2: the fix this doc exists for -- previously omitted entirely
+        # from the hand-built BridgeConfig(...) call this method used to make, so it
+        # always took the dataclass default (False) regardless of this database's
+        # actual configured ssl value (the confirmed root cause of the SSL-enabled
+        # FalkorDB query-tool failure logged in known-issues.md).
+        config_dict['database_ssl'] = db_config.get('ssl', False)
+        # Preserve the exact previously-hardcoded values for fields the deleted
+        # constructor call set explicitly (config_path-derived models_path, empty
+        # notes/debug for this non-sync client-construction path).
+        config_dict['modelsPath'] = str(Path(config_path).parent) if config_path else ''
+        config_dict['notes'] = []
+        config_dict['debug'] = False
+        # Preserve the deleted constructor's 'default' fallback (from_dict()'s own
+        # default_namespace fallback is 'vault') for the edge case where
+        # obsidian_config has no defaultNamespace at all.
+        config_dict['defaultNamespace'] = obsidian_config.get('defaultNamespace', 'default')
+
+        return BridgeConfig.from_dict(config_dict, db_entry=db_config)
 
     async def _get_graphiti_client(self, database_id: Optional[str] = None) -> Any:
         """Return the Graphiti client for a specific database; falls back to default client
@@ -2792,7 +3074,7 @@ async def _run_http_server(mcp_server: 'ObsidianMegaMemMCPServer', host: str, po
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         import uvicorn
     except ImportError as e:
-        logger.critical(f"[HTTP] Missing dependency: {e}. Run: pip install starlette uvicorn mcp>=1.6.0")
+        logger.critical(f"[HTTP] Missing dependency: {e}. Run: pip install starlette uvicorn \"mcp>=1.28,<2\"")
         sys.exit(1)
 
     # stateless=True + json_response=True: each POST is self-contained, returns JSON immediately

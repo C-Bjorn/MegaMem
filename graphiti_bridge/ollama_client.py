@@ -64,7 +64,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
 from graphiti_core.llm_client.config import DEFAULT_MAX_TOKENS, LLMConfig, ModelSize
-from graphiti_core.llm_client.errors import RateLimitError
+from graphiti_core.llm_client.errors import EmptyResponseError, RateLimitError
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.prompts.models import Message
 
@@ -111,7 +111,21 @@ class OllamaGenericClient(OpenAIGenericClient):
                 timeout=httpx.Timeout(connect=10.0, read=timeout, write=10.0, pool=10.0),
             )
 
-        super().__init__(config=config, cache=cache, client=client)
+        # Day79.02 Task 3 audit finding: _generate_response() below always sends
+        # response_format={'type': 'json_object'} (Ollama-specific — see module
+        # docstring for why json_schema strict mode isn't used here), but without
+        # this, OpenAIGenericClient.__init__ defaults structured_output_mode to
+        # 'json_schema'. The inherited generate_response() only injects the
+        # response_model's schema into the prompt when
+        # self.structured_output_mode == 'json_object' (json_schema mode relies
+        # on response_format enforcing it instead) — so with the mismatched
+        # default, no schema ever reached the model. Live-verified: an
+        # attribute-extraction call returned free-form fields instead of the
+        # requested schema until this was set. Setting it here keeps the actual
+        # request mode and the mode the base class believes it's in consistent.
+        super().__init__(
+            config=config, cache=cache, client=client, structured_output_mode='json_object'
+        )
 
     async def _generate_response(
         self,
@@ -144,7 +158,19 @@ class OllamaGenericClient(OpenAIGenericClient):
                 extra_body={'options': {'num_ctx': self.num_ctx}},
             )
             result = response.choices[0].message.content or ''
-            return json.loads(result)
+            # Day79.02 Task 3 audit: OpenAIGenericClient._generate_response() (the
+            # method this override replaces) added an empty-response check and
+            # markdown-code-fence stripping in 0.29.x — this override predates
+            # both and bypassed them entirely since it fully replaces
+            # _generate_response() rather than calling super(). Ollama's
+            # OpenAI-compat models are exactly the kind upstream's own comment
+            # calls out as frequently wrapping JSON in ```json fences, so this
+            # was a real, live gap, not a hypothetical one. Reuse the shared
+            # implementations (inherited from OpenAIGenericClient) instead of
+            # duplicating them, so this can't drift again on the next release.
+            if not result:
+                raise EmptyResponseError('LLM returned an empty response')
+            return json.loads(self._strip_code_fences(result))
         except openai.RateLimitError as e:
             raise RateLimitError from e
         except Exception as e:

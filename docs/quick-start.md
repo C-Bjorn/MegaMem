@@ -9,7 +9,7 @@ tags:
   - quickstart
 sidebar: auto
 date_created: 2025-09-23T11:20
-date_updated: 2025-09-28T11:36
+date_updated: 2026-10-13T00:00
 ---
 
 # 🚀 Quick Start Guide
@@ -78,12 +78,14 @@ MegaMem's MCP server uses the **Obsidian CLI** (native since Obsidian 1.12) to r
 ---
 
 ### Step 1: Database Setup
-Setup your preferred database (Neo4j or FalkorDB - see [Database Setup](guides/database-setup.md) for details). **Kuzu & Amazon Neptune coming soon**
+Setup your preferred database (Neo4j or FalkorDB, including TLS-enabled FalkorDB - see [Database Setup](guides/database-setup.md) for details). MegaMem Pro members can instead add an **Endogon Hosted Graph** in one click from the Pro tab. **Kuzu & Amazon Neptune coming soon**
 
 ### Step 2: Python Dependencies
 Under Python Environment (first accordion section), click **"Install Dependencies"**.
 
-Uses the **UV Package Manager** by default — recommended for all platforms (macOS, Windows, Linux). System Python is available for advanced users who prefer their own environment.
+Uses the **UV Package Manager** by default — recommended for all platforms (macOS, Windows, Linux). System Python is available for advanced users who prefer their own environment. Versions are pinned (`graphiti-core` 0.29.3, `mcp>=1.28,<2`); **Manage Dependencies** shows a health readout of what is installed. Upgrading from an earlier version? Click **Install Dependencies** again.
+
+> ⚠️ **Windows:** Defender scanning a brand-new venv can make the first MCP server start exceed the client's handshake window. If it times out, restart your MCP client once; consider a Defender exclusion for the venv folder.
 
 ### Step 3: LLM Configuration
 In Plugin Settings → API Keys, add your LLM provider key and select "Load Defaults" to populate recommended models.

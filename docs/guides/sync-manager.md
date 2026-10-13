@@ -12,7 +12,7 @@ tags:
   - Data Transfer
 last_updated: 2026-03-23
 date_created: 2025-09-23T17:46
-date_updated: 2026-03-23T00:00
+date_updated: 2026-10-13T00:00
 ---
 
 # MegaMem Panel — Sync & Analytics
@@ -27,6 +27,8 @@ The panel can be opened four ways:
 2. **Command Palette**: `MegaMem: Open Panel` (or `Open Sync` / `Open Analytics` / `Open Ontology` to jump directly to a specific tab).
 3. **Settings Tab**: Navigate to the MegaMem plugin settings → Sync Configuration → "Open Sync UI".
 4. **Tab persistence**: The panel remembers the last active tab and restores it on re-open.
+
+> **Namespaces (v1.8.0):** a note's `group_id` is resolved by one shared resolver: `mm_group_id` frontmatter wins; `g_group_id` is deprecated but honoured with a warning notice. Notes with only `g_group_id` sync to the same namespace as before. The panel also contains a **Publish** tab — see the [Publish guide](publish-manager.md).
 
 ## Overview
 

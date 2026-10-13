@@ -13,7 +13,8 @@ import time
 import asyncio
 import logging
 import os
-from typing import Dict, Any, Tuple
+import ssl
+from typing import Dict, Any, Tuple, Optional
 
 # Import local modules with fallback for direct execution (exact pattern from sync.py)
 try:
@@ -23,7 +24,11 @@ try:
         setup_logging,
         print_json_response
     )
-    from .sync import create_embedder_client as sync_create_embedder_client, _get_ollama_base_url
+    from .sync import (
+        create_embedder_client as sync_create_embedder_client,
+        _get_ollama_base_url,
+        build_falkor_connection,
+    )
 except ImportError:
     # Fall back to absolute imports (when run directly)
     # Add parent directory to sys.path for module resolution when running from plugin directory
@@ -39,7 +44,11 @@ except ImportError:
         setup_logging,
         print_json_response
     )
-    from graphiti_bridge.sync import create_embedder_client as sync_create_embedder_client, _get_ollama_base_url
+    from graphiti_bridge.sync import (
+        create_embedder_client as sync_create_embedder_client,
+        _get_ollama_base_url,
+        build_falkor_connection,
+    )
 
 # Core Graphiti imports
 from graphiti_core.llm_client.config import LLMConfig
@@ -192,29 +201,155 @@ def test_neo4j_connection(config: BridgeConfig, start_time: float) -> Tuple[bool
             return False, f"Neo4j connection error: {str(e)}", latency
 
 
+def _is_permission_error(exc: Exception) -> bool:
+    """
+    True if `exc` represents a FalkorDB/Redis ACL permission rejection (NOPERM),
+    not a wrong-credential (AUTH) rejection.
+
+    redis-py raises this as a typed `NoPermissionError` whose message is the
+    human-readable "No permissions to access a key" -- it does NOT contain the
+    literal wire-protocol string "NOPERM". Checking only for the substring
+    "noperm" misses every real ACL rejection raised through redis-py (confirmed
+    against the live FalkorDB Cloud instance during Day86.02 Task 1.6 live
+    verification), which silently let a genuine permission rejection fall through
+    to a "graph doesn't exist yet, tolerate it" branch -- a false-success bug.
+    """
+    error_msg = str(exc).lower()
+    error_type = type(exc).__name__.lower()
+    return (
+        'nopermissionerror' in error_type
+        or 'noperm' in error_msg
+        or 'no permissions to access a key' in error_msg
+        or 'no permission' in error_msg
+    )
+
+
+def _map_falkordb_connection_error(
+    exc: Exception,
+    graph_name: Optional[str] = None,
+    source: Optional[str] = None,
+) -> str:
+    """
+    Translate raw FalkorDB/Redis connection exceptions into comprehensible messages
+    (Day86.01, extended Day86.02 Task 1.6, extended Day87.01 Task 5).
+
+    The raw strings surfaced by redis-py/FalkorDB Cloud are not comprehensible to end
+    users: a TLS handshake failure (e.g. a plaintext attempt against a TLS-only Cloud
+    endpoint) surfaces as a generic socket reset (WinError 10054 on Windows, or an
+    ssl.SSLError/ssl.SSLCertVerificationError), with no mention of TLS anywhere in the
+    text. An auth rejection is surfaced by Redis Enterprise/FalkorDB Cloud as the
+    generic "ResponseError: LDAP authentication failed" string, which we cannot prove is
+    actually an LDAP-specific problem -- so this only names it as "authentication",
+    never "LDAP".
+
+    Day86.02 Task 1.6: a permission-scoping rejection (a valid credential whose ACL
+    `~<graphname>` pattern does not cover the configured Graph Name) surfaces as
+    "NOPERM No permissions to access a key" -- a different failure mode than a wrong
+    username/password, and one that must name the configured graph explicitly rather
+    than leak the raw ACL string, per this doc's acceptance criterion.
+
+    `graph_name`, when provided by the caller, is `config.database_name` -- the Graph
+    Name the connection was configured to target. Never used to retry against a
+    different graph; only to make the rejection message actionable.
+
+    Day87.01 Task 5: `source`, when provided by the caller, is `config.source`. When
+    it equals `'endogon'` (the config was created/refreshed via "Connect via API Key"),
+    an auth-shaped rejection (permission OR authentication branch below) is a strong
+    signal of a stale/rotated Endogon-managed credential, so the message points the
+    user at "Refresh from Endogon" in addition to the existing generic wording. Gated
+    purely on this flag -- a self-hosted Steward can hit the identical NOPERM/AUTH
+    failure for unrelated reasons and must keep getting the original generic message
+    (source is None or anything other than 'endogon').
+
+    Does not swallow the original exception: it stays available on `exc` for the
+    caller/logs, this only shapes the *message* string returned to the user.
+    """
+    error_msg = str(exc).lower()
+    error_type = type(exc).__name__.lower()
+
+    is_tls_error = (
+        isinstance(exc, ssl.SSLError)
+        or 'sslerror' in error_type
+        or 'ssl' in error_msg
+        or 'wrong version number' in error_msg
+        or '10054' in error_msg
+        or 'connection reset' in error_msg
+    )
+    if is_tls_error:
+        return (
+            f"TLS handshake failed - check the TLS/SSL setting for this connection. "
+            f"(details: {exc})"
+        )
+
+    if _is_permission_error(exc):
+        graph_label = f"'{graph_name}'" if graph_name else "the configured graph"
+        endogon_hint = (
+            " This connection is managed via Endogon - try 'Refresh from Endogon' "
+            "in the Add/Edit DB form to obtain a current credential."
+            if source == 'endogon' else ""
+        )
+        return (
+            f"Permission denied - this connection's credentials are not authorized to "
+            f"access graph {graph_label}. Check the ACL scope for this database user "
+            f"(the Redis ACL key pattern must include {graph_label})."
+            f"{endogon_hint} "
+            f"(details: {exc})"
+        )
+
+    if 'authentication' in error_msg or 'wrongpass' in error_msg or 'noauth' in error_msg:
+        endogon_hint = (
+            " This connection is managed via Endogon - try 'Refresh from Endogon' "
+            "in the Add/Edit DB form to obtain a current credential."
+            if source == 'endogon' else ""
+        )
+        return (
+            f"Authentication failed - check username and password for this connection."
+            f"{endogon_hint} "
+            f"(details: {exc})"
+        )
+
+    if 'connection refused' in error_msg:
+        return "Connection refused. Check if FalkorDB/Redis is running and URL is correct."
+
+    return f"FalkorDB connection error: {exc}"
+
+
 def test_falkordb_connection(config: BridgeConfig, start_time: float) -> Tuple[bool, str, int]:
     """Test FalkorDB database connection"""
     try:
         import redis  # type: ignore[import-not-found]
-        from urllib.parse import urlparse
 
-        parsed = urlparse(config.database_url)
+        # Day86.01: connection kwargs now come from the same build_falkor_connection()
+        # helper sync.py uses at runtime, closing the two-divergent-paths defect (this
+        # probe previously built its own raw redis.Redis(...) call with no TLS route).
+        conn = build_falkor_connection(config)
         client = redis.Redis(
-            host=parsed.hostname or 'localhost',
-            port=parsed.port or 6379,
-            username=config.database_username or None,
-            password=config.database_password or None,
+            host=conn['host'],
+            port=conn['port'],
+            username=conn['username'],
+            password=conn['password'],
+            ssl=conn['ssl'],
             decode_responses=True
         )
 
         client.ping()
 
-        # Test graph query (optional, graph might not exist yet)
+        # Test graph query. A missing graph (lazy creation not yet triggered) is
+        # tolerated -- but a NOPERM/permission rejection is a real failure that must
+        # surface, not be swallowed (Day86.02 Task 1.6): AUTH can succeed for a
+        # Steward-scoped credential whose username/password are valid on the instance,
+        # while the configured Graph Name still falls outside that credential's ACL
+        # `~<graphname>` pattern, e.g. a typo'd or reused Graph Name field.
         try:
             client.execute_command(
                 "GRAPH.QUERY", config.database_name, "RETURN 1 as test")
-        except Exception:
-            pass  # Graph creation not required for connection test
+        except Exception as graph_exc:
+            if _is_permission_error(graph_exc):
+                latency = get_latency_ms(start_time)
+                return False, _map_falkordb_connection_error(
+                    graph_exc, config.database_name, getattr(config, 'source', None)
+                ), latency
+            # Any other error here (graph doesn't exist yet) is expected and tolerated.
 
         latency = get_latency_ms(start_time)
         return True, f"FalkorDB connection successful to database '{config.database_name}'", latency
@@ -223,14 +358,9 @@ def test_falkordb_connection(config: BridgeConfig, start_time: float) -> Tuple[b
         return False, "Redis driver not installed. Run: pip install redis", get_latency_ms(start_time)
     except Exception as e:
         latency = get_latency_ms(start_time)
-        error_msg = str(e).lower()
-
-        if "connection refused" in error_msg:
-            return False, "Connection refused. Check if FalkorDB/Redis is running and URL is correct.", latency
-        elif "authentication" in error_msg:
-            return False, "Authentication failed. Check username and password.", latency
-        else:
-            return False, f"FalkorDB connection error: {str(e)}", latency
+        return False, _map_falkordb_connection_error(
+            e, config.database_name, getattr(config, 'source', None)
+        ), latency
 
 
 async def test_llm_connection(config: BridgeConfig) -> Tuple[bool, str, int]:
@@ -449,9 +579,16 @@ async def check_dimension_compatibility_test(config: BridgeConfig) -> Tuple[bool
             except Exception as db_err:
                 return False, f"DB dimension query failed: {str(db_err)}", get_latency_ms(start_time)
         else:
-            return True, (
-                f"Embedder ready: {config.embedder_provider}/{config.embedding_model} ({expected_dims}D) "
-                f"— dimension check not supported for {config.database_type}"
+            # Day86.01: previously returned success=True here, which SettingsTab.ts
+            # rendered as a green "[OK] Dimensions" pass for a check that never actually
+            # ran against FalkorDB (dimension compatibility is only queryable for Neo4j
+            # above). Frontend contract: success=False + a message starting with the
+            # literal prefix "SKIPPED: " (space after colon) signals "not applicable",
+            # not "failed" -- the UI must render this as a neutral/skipped state, never
+            # a red X and never a green check.
+            return False, (
+                f"SKIPPED: dimension check not supported for {config.database_type} "
+                f"(embedder ready: {config.embedder_provider}/{config.embedding_model}, {expected_dims}D)"
             ), get_latency_ms(start_time)
 
     except Exception as e:
@@ -656,8 +793,18 @@ async def test_schema_initialization(config: BridgeConfig) -> Tuple[bool, str, i
         return False, f"Required modules not available: {str(e)}", get_latency_ms(start_time)
     except Exception as e:
         latency = get_latency_ms(start_time)
-        error_msg = str(e).lower()
 
+        # Day86.01: FalkorDB gets the same TLS/auth-naming treatment as the connection
+        # probe (_map_falkordb_connection_error) since schema-init hits the identical
+        # underlying connection failures. Neo4j's existing branch below is untouched.
+        # Day86.02 Task 1.6: also pass the configured Graph Name so a NOPERM rejection
+        # during index/constraint creation names it explicitly.
+        if getattr(config, 'database_type', 'neo4j') == 'falkordb':
+            return False, _map_falkordb_connection_error(
+                e, config.database_name, getattr(config, 'source', None)
+            ), latency
+
+        error_msg = str(e).lower()
         if "connection refused" in error_msg:
             return False, "Database connection refused. Check if database is running.", latency
         elif "authentication" in error_msg:

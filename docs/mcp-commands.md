@@ -1,10 +1,10 @@
 ---
 date_created: 2025-09-23T18:03
-date_updated: 2026-04-01T00:00
+date_updated: 2026-10-13T00:00
 ---
 # MCP Commands Reference
 
-This document lists all 22 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 11 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 24 available commands (tools) provided by the MegaMem MCP server: 12 MegaMem Graph Operations, 11 Obsidian File Operations (via CLI), and `ask_bjorn` (only registered when a Pro key with the Ask Bjørn capability is configured — otherwise 23 tools are listed). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -39,6 +39,7 @@ Stores conversations in Graphiti memory using the message episode type. Client (
 | `conversation` | `array` | Array of message objects (see below) | Yes | |
 | `group_id` | `string` | Group ID for organizing memories | No | |
 | `source_description` | `string` | Description of conversation source | No | `Conversation memory from MCP` |
+| `database_id` | `string` | Optional: target a specific named database | No | |
 
 **Message Object Structure:**
 
@@ -79,6 +80,8 @@ Search for nodes in the memory graph (aliases: mm, megamem, memory)
 | `query` | `string` | Search query | Yes | |
 | `max_nodes` | `integer` | Max results | No | `10` |
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
+| `center_node_uuid` | `string` | UUID of node to center the search around (proximity search) | No | |
+| `entity_types` | `array` | Filter by entity types (e.g. `["Person", "Company"]`) | No | |
 | `node_labels` | `array` | Filter results to nodes with specific label types (e.g. `["Person", "Organization"]`) | No | |
 | `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"status": "active"}`) | No | |
 | `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No | |
@@ -94,6 +97,7 @@ Search for facts/relationships in the memory graph (aliases: mm, megamem, memory
 | `query` | `string` | Search query | Yes | |
 | `max_facts` | `integer` | Max results | No | `10` |
 | `group_ids` | `array` | Optional list of group IDs to search in | No | |
+| `center_node_uuid` | `string` | UUID of node to center the search around (proximity search) | No | |
 | `node_labels` | `array` | Filter by node label types (e.g. `["Person", "Organization"]`) | No | |
 | `property_filters` | `object` | Filter by specific node/edge properties (e.g. `{"group_id": "Journal"}`) | No | |
 | `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No | |
@@ -108,6 +112,7 @@ Get episodes from the memory graph (aliases: mm, megamem, memory)
 |---|---|---|---|---|
 | `group_id` | `string` | Group ID to retrieve episodes from | No | |
 | `last_n` | `integer` | Number of most recent episodes to retrieve | No | `10` |
+| `database_id` | `string` | Optional: target a specific named database | No | |
 
 > **Episode back-references** *(v1.5.5+)*: Episodes created by syncing Obsidian notes include source attribution in the `content` field: `mm_note_path` (vault-relative path), `mm_vault_id` (vault name), `mm_obsidian_url` (deep link for one-click opening), and `mm_contributor` (who synced it). Use `get_episodes()` → parse `mm_note_path` + `mm_vault_id` → call `read_obsidian_note(path, vault_id)` to navigate from graph knowledge back to the source note.
 
@@ -115,7 +120,11 @@ Get episodes from the memory graph (aliases: mm, megamem, memory)
 
 Clear the entire memory graph (aliases: mm, megamem, memory)
 
-**Parameters:** None
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `database_id` | `string` | Optional: target a specific named database (defaults to the connected/default database) | No | |
 
 ### `get_entity_edge`
 
@@ -127,6 +136,8 @@ Get entity edges from the graph (aliases: mm, megamem, memory)
 |---|---|---|---|---|
 | `entity_name` | `string` | Entity name | Yes | |
 | `edge_type` | `string` | Edge type (optional) | No | |
+| `group_ids` | `array` | Optional list of group IDs to scope the search (prevents cross-group data leakage) | No | |
+| `database_id` | `string` | Optional: target a specific named database | No | |
 
 ### `delete_entity_edge`
 
@@ -137,6 +148,7 @@ Delete entity edges from the graph (aliases: mm, megamem, memory)
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
 | `uuid` | `string` | UUID of the entity edge to delete | Yes | |
+| `database_id` | `string` | Optional: target a specific named database | No | |
 
 ### `delete_episode`
 
@@ -147,6 +159,7 @@ Delete an episode from the graph (aliases: mm, megamem, memory)
 | Name | Type | Description | Required | Default |
 |---|---|---|---|---|
 | `episode_id` | `string` | Episode ID to delete | Yes | |
+| `database_id` | `string` | Optional: target a specific named database | No | |
 
 ### `list_databases`
 
@@ -184,9 +197,19 @@ Manage sagas in the memory graph — list all sagas or summarize a specific saga
 
 > **Tip:** Use `list` first to discover saga names, then call `summarize` by name. Sagas are created automatically when notes are synced with `saga_name` set in frontmatter.
 
+### `ask_bjorn`
+
+Ask Bjørn a question about MegaMem, Endogon, or the product — not the member's own Obsidian vault. A full autonomous agent turn: Bjørn may search Endogon's roadmap/product/FAQ records, submit a roadmap item, or leave a message before answering. Requires a MegaMem Pro key with the `service.ask_bjorn` capability, configured in Plugin Settings → Pro tab; the tool is absent from the tool list otherwise. Always free (unmetered).
+
+**Parameters:**
+
+| Name | Type | Description | Required | Default |
+|---|---|---|---|---|
+| `question` | `string` | The question to ask Bjørn | Yes | |
+
 ## Obsidian File Operations (via Obsidian CLI)
 
-> **ℹ️ Architecture Note:** These 10 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.
+> **ℹ️ Architecture Note:** These 11 file tools are powered by stateless `obsidian <command>` subprocess calls to the **Obsidian CLI** (v1.12.4+), replacing the previous WebSocket layer. No persistent connection or heartbeat is required. Multi-vault targeting is handled via the `vault_id` parameter. Requires Obsidian 1.12.4+ installer — see [Quick Start Guide](quick-start.md) for setup.
 >
 > **Non-markdown files supported:** The `_auto_md` fix means `.md` auto-append is skipped when a path already has a recognized extension (`.pdf`, `.png`, `.csv`, `.base`, etc.). All file tools work with non-markdown vault files.
 
@@ -410,6 +433,7 @@ Sync a specific note to the MegaMem/Graphiti knowledge graph by path. Opens the 
 |---|---|---|---|---|
 | `path` | `string` | Vault-relative path to the note (e.g. `'My Notes/SomeNote.md'`). Do NOT use absolute system paths or prefix with the vault folder name. | Yes | |
 | `vault_id` | `string` | Vault ID (optional) | No | |
+| `database_id` | `string` | Optional: target a specific configured database (`settings.databases[].id`) via the plugin's RPC bridge instead of the default database. An unrecognized ID fails with a named error rather than falling back to the default database. | No | |
 
 ---
 
@@ -445,11 +469,11 @@ MegaMem exposes three read-only MCP resources. Access them with `read_resource` 
 
 ### `megamem://instructions`
 
-Concise usage guide (22 tools, shorthands, key behaviors). Loaded automatically by Claude as the server's system prompt context.
+Concise usage guide (24 tools, shorthands, key behaviors). Loaded automatically by Claude as the server's system prompt context.
 
 ### `megamem://instructions/reference`
 
-Full parameter reference for all 22 tools. Load on demand when you need complete parameter details for a specific tool.
+Full parameter reference for all 24 tools. Load on demand when you need complete parameter details for a specific tool.
 
 ### `megamem://status`
 

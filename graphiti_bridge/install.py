@@ -15,6 +15,33 @@ import argparse
 import io
 from typing import List, Dict, Any
 
+# Single source of truth for the graphiti-core version constraint (Day79.02 Task 1 / Rev 5 SS8).
+# Do not hardcode a pin here - read it from mcp-server/requirements.txt so there is exactly
+# one place that declares the graphiti-core version across the whole plugin.
+_REQUIREMENTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mcp-server', 'requirements.txt')
+
+
+def read_graphiti_core_spec(requirements_path: str = _REQUIREMENTS_PATH) -> str:
+    """Read the exact graphiti-core[extras]==version spec from mcp-server/requirements.txt.
+
+    Falls back to a safe last-known pin only if requirements.txt cannot be read at all,
+    so this script never silently installs an unbounded/arbitrary version.
+    """
+    fallback = "graphiti-core[falkordb,anthropic,google-genai,groq,voyageai]==0.29.3"
+    try:
+        with open(requirements_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('graphiti-core'):
+                    return line
+    except OSError as e:
+        print(f"WARNING: Could not read {requirements_path}: {e}")
+        print(f"WARNING: Falling back to last-known pin: {fallback}")
+        return fallback
+    print(f"WARNING: No graphiti-core line found in {requirements_path}")
+    print(f"WARNING: Falling back to last-known pin: {fallback}")
+    return fallback
+
 # Force UTF-8 encoding for Windows compatibility
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -50,12 +77,12 @@ def build_extras_list(config: Dict[str, Any]) -> List[str]:
         # LLM provider extras
         'anthropic',
         'google-genai',
-        'azure-openai',
         'groq',
-        # Note: openai and ollama are included in base graphiti-core
+        # Note: openai, ollama, and azure-openai (LLM client + embedder) are included in
+        # base graphiti-core - there is no 'azure-openai' extra on this release (Day79.02 wrap-up)
 
         # Embedder provider extras
-        'voyage',
+        'voyageai',
         # Note: openai embedder is included in base graphiti-core
     ]
 
@@ -63,16 +90,14 @@ def build_extras_list(config: Dict[str, Any]) -> List[str]:
 
 
 def install_graphiti(package_manager: str, extras: List[str]):
-    """Install graphiti-core with specified extras using detected package manager"""
+    """Install graphiti-core using the exact spec declared in mcp-server/requirements.txt.
 
-    # Build package specification
-    if extras:
-        extras_str = ','.join(extras)
-        package_spec = f"graphiti-core[{extras_str}]>=0.18.0"
-        print(f"Installing graphiti-core with extras: {extras_str}")
-    else:
-        package_spec = "graphiti-core>=0.18.0"
-        print("Installing graphiti-core (no extras)")
+    `extras` is accepted for backward compatibility with callers/CLI args but is no longer
+    used to build the spec - requirements.txt is the single source of truth for both the
+    version pin and the extras list (Day79.02 Task 1 / Rev 5 SS8).
+    """
+    package_spec = read_graphiti_core_spec()
+    print(f"Installing graphiti-core using spec from requirements.txt: {package_spec}")
 
     # Build installation command (simplified to use only pip)
     cmd = ['pip', 'install', '--upgrade', '--user', package_spec]
@@ -175,8 +200,8 @@ def main():
         extras = build_extras_list(config)
         print(f"Installing ALL provider extras for maximum compatibility:")
         print(f"  - Database: neo4j (built-in), falkordb")
-        print(f"  - LLM: openai (built-in), anthropic, google-genai, azure-openai, groq, ollama (built-in)")
-        print(f"  - Embedder: openai (built-in), voyage")
+        print(f"  - LLM: openai (built-in), anthropic, google-genai, azure-openai (built-in), groq, ollama (built-in)")
+        print(f"  - Embedder: openai (built-in), voyageai")
         print(f"\nThis ensures you can switch between any provider without reinstalling.")
 
         # Step 4: Install graphiti-core

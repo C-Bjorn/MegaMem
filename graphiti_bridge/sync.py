@@ -8,13 +8,13 @@ This script is called by the TypeScript plugin and handles the sync process for 
 
 # Performance optimization flags
 import json
-from graphiti_core.llm_client.gemini_client import GeminiClient
-from graphiti_core.llm_client.anthropic_client import AnthropicClient
-from graphiti_core.driver.neo4j_driver import Neo4jDriver
-from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
-from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
-from graphiti_core.llm_client.openai_client import OpenAIClient
+# Day85.03: provider-specific LLM clients (GeminiClient, AnthropicClient, OpenAIClient,
+# OpenAIGenericClient), Neo4jDriver, and OpenAIRerankerClient/OpenAIEmbedder used to be
+# imported eagerly here, on every daemon/MCP-server launch, regardless of which single
+# provider a given vault actually configures. Measured cost: 57s for this module's own
+# import on a real client machine (see Day85.03 DevDoc). They are now loaded on first
+# use via graphiti_bridge/lazy_imports.py's get_*() accessors, following the same
+# lazy-loading pattern already established there for the Gemini/Voyage/Azure embedders.
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.nodes import EpisodicNode
 from graphiti_core.utils.bulk_utils import RawEpisode
@@ -22,7 +22,7 @@ from graphiti_core.nodes import EpisodeType
 from graphiti_core import Graphiti
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import re
 import argparse
 import traceback
@@ -31,13 +31,17 @@ import asyncio
 import logging
 import time
 import os
-SKIP_VOYAGE_IMPORT = os.getenv('SKIP_VOYAGE_IMPORT', 'false').lower() == 'true'
 
-# Diagnostics buffer collected during run and attached to stdout JSON so callers that
-# only capture stdout (and not stderr) will still receive critical diagnostic messages.
+# Sentinel passed as embedding_dim to embedder branches whose graphiti-core client
+# slices the real API response to a frozen 1024D default when unset, making the slice
+# a permanent no-op. Value exceeds every embedding model dimension known to this
+# codebase. See Day79.01 and create_embedder_client()'s docstring.
+NO_TRUNCATION_EMBEDDING_DIM = 8192
+
+# Buffer for critical diagnostics that must survive even when a caller captures only
+# stdout (not stderr).
 _DIAGNOSTICS_BUFFER = []
 
-# Import timing removed - not useful in production
 try:
     # UTF-8 stdout encoding for Windows environments
     if hasattr(sys, 'stdout') and hasattr(sys.stdout, 'reconfigure'):
@@ -58,17 +62,10 @@ try:
 except Exception:
     pass
 
-# Import timing removed - not useful in production
 
-
-# FalkorDB driver import with graceful fallback
-FALKORDB_AVAILABLE = False
-FalkorDriver = None
-try:
-    from graphiti_core.driver.falkordb_driver import FalkorDriver
-    FALKORDB_AVAILABLE = True
-except ImportError:
-    pass  # FalkorDB driver not available
+# Day85.03: FalkorDB driver (and the other provider drivers/clients below) is now
+# loaded lazily via lazy_imports.get_falkor_driver() at the point of use in
+# initialize_graphiti(), instead of eagerly here on every module import.
 
 # Import LLM client creation function and configurations
 
@@ -117,11 +114,69 @@ from .utils import (
     validate_note_file,
     print_json_response,
     print_final_json_response,
-    print_error_and_exit
+    print_error_and_exit,
+    install_attribute_cap_capture,
+    summarize_attribute_cap_drops,
+    verify_attribute_cap_env_effect,
 )
 from .models import initialize_global_loader, get_node_types, get_edge_types, get_entity_type_definitions, get_edge_type_definitions, get_edge_type_map, get_graphiti_entity_types, get_graphiti_edge_types, get_graphiti_edge_type_map
-from .openrouter_client import OpenRouterClient, InfrastructureError
-from .ollama_client import OllamaGenericClient, ensure_bounded_ollama_model, DERIVATIVE_STATE_FILENAME
+# InfrastructureError is stdlib-only (graphiti_bridge/errors.py) so it can stay eager —
+# it's caught in a top-level except clause below regardless of which provider ran.
+# OpenRouterClient/OllamaGenericClient themselves (and their openai/httpx/graphiti_core
+# import chains) are loaded lazily via lazy_imports.get_openrouter_client() /
+# get_ollama_client() only inside their respective provider branches. See Day85.03.
+from .errors import InfrastructureError
+from .lazy_imports import (
+    get_openai_client,
+    get_openai_generic_client,
+    get_anthropic_client,
+    get_gemini_client,
+    get_neo4j_driver,
+    get_falkor_driver,
+    get_falkordb_client,
+    get_openai_reranker_client,
+    get_openai_embedder,
+    get_openrouter_client,
+    get_ollama_client,
+)
+
+
+def build_falkor_connection(config: BridgeConfig) -> Dict[str, Any]:
+    """
+    Parse config.database_url into FalkorDB/Redis connection kwargs (Day86.01).
+
+    Single source of truth shared by both this module's initialize_graphiti() (runtime
+    driver construction) and test_connections.py's test_falkordb_connection() (the Test
+    Connection probe). Before this, those two built FalkorDB connections through two
+    independently-maintained code paths -- sync.py via FalkorDriver(host=...), and the
+    probe via a raw redis.Redis(host=...) -- and only sync.py had any route to TLS. That
+    divergence meant the probe could never represent what a real sync would do.
+
+    Accepts both 'redis://' and 'falkor://' schemes, falling back to localhost:6379 on no
+    match -- exact parity with the regex this replaces (previously inline in
+    initialize_graphiti()).
+
+    Returns a dict with keys: host (str), port (int), username (Optional[str]),
+    password (Optional[str]), ssl (bool). ssl_cert_reqs is intentionally NOT included --
+    'required' (certificate verification on) is the falkordb-py/redis-py library default,
+    so omitting it here is transparent (identical behavior with or without this override),
+    not hidden magic. A caller needing to relax verification would pass ssl_cert_reqs
+    explicitly at the construction site, not through this helper.
+    """
+    match = re.match(r'(?:redis|falkor)://([^:]+):(\d+)', config.database_url)
+    if match:
+        host, port_str = match.groups()
+        port = int(port_str)
+    else:
+        host, port = 'localhost', 6379
+
+    return {
+        'host': host,
+        'port': port,
+        'username': config.database_username or None,
+        'password': config.database_password or None,
+        'ssl': bool(getattr(config, 'database_ssl', False)),
+    }
 
 
 async def main():
@@ -154,9 +209,6 @@ async def main():
 
         debug_mode = getattr(config, 'debug', False)
         if not debug_mode:
-            # Redirect stderr to devnull to suppress ALL library output
-            # sys.stderr = open(os.devnull, 'w')
-
             # DO NOT use logging.disable() - it globally disables ALL logging
             # Instead, selectively disable specific third-party loggers
             # Disable all known third-party loggers (comprehensive list for ML libraries)
@@ -185,11 +237,8 @@ async def main():
         # Set up logging only if debug mode
         logger = setup_logging(debug_mode)
 
-        # Network debugging and initialization
         if debug_mode:
             logger.info("Starting Graphiti Bridge sync process")
-
-            # Import timing removed - not useful in production
 
         # Validate configuration
         validation_errors = config.validate()
@@ -199,8 +248,19 @@ async def main():
                 logger.error(f"Validation failed: {error_msg}")
             print_error_and_exit(error_msg)
 
-        # Set up environment variables for providers
         setup_environment_variables(config)
+
+        # Install the attribute-cap drop handler and verify the
+        # GRAPHITI_ATTRIBUTE_MAX_LENGTH mitigation took effect. See Day79.02.
+        attr_cap_handler = install_attribute_cap_capture()
+        attr_cap_env_check = verify_attribute_cap_env_effect()
+        _DIAGNOSTICS_BUFFER.append(f"[ATTR-CAP-ENV] {attr_cap_env_check}")
+        if attr_cap_env_check.get('took_effect'):
+            if debug_mode:
+                logger.info(
+                    f"attribute_cap_env_verified effective_max_length={attr_cap_env_check.get('effective_max_length')}")
+        else:
+            logger.warning(f"attribute_cap_env_not_verified {attr_cap_env_check}")
 
         # Initialize model loader only if custom ontology is enabled
         if config.use_custom_ontology:
@@ -303,10 +363,12 @@ async def main():
             print_error_and_exit(
                 f"Expected exactly 1 note, got {len(config.notes)}")
 
-        # Process note with timing
         note_processing_start = time.time()
         if debug_mode:
             logger.debug(f"Processing note: {config.notes[0]}")
+
+        # Clear drops from a prior note (defensive; main() processes one note per run).
+        attr_cap_handler.clear()
 
         result = await process_note(config.notes[0], graphiti, logger, config)
 
@@ -314,6 +376,10 @@ async def main():
             note_processing_time = time.time() - note_processing_start
             logger.debug(
                 f"Note processing completed in {note_processing_time:.2f}s")
+
+        # Surface attribute-length-cap drops in the sync result. See Day79.02.
+        if isinstance(result, dict):
+            result['dropped_attributes'] = summarize_attribute_cap_drops(attr_cap_handler)
 
         # Ensure database connection is properly closed
         if config.debug:
@@ -326,11 +392,6 @@ async def main():
         except Exception as e:
             if debug_mode and logger:
                 logger.warning(f"Error closing Graphiti connection: {e}")
-
-        # Restore stderr before printing final result
-        if not debug_mode:
-            sys.stderr.close()
-            sys.stderr = original_stderr
 
         # Return success response
         try:
@@ -381,13 +442,6 @@ async def main():
                   separators=(',', ':')), flush=True)
 
     except KeyboardInterrupt:
-        # Restore stderr before error exit
-        if not debug_mode and sys.stderr != original_stderr:
-            try:
-                sys.stderr.close()
-            except Exception:
-                pass
-            sys.stderr = original_stderr
         if logger:
             logger.debug("Keyboard interrupt")
         # Return structured JSON for keyboard interrupt
@@ -410,14 +464,6 @@ async def main():
                          separators=(',', ':')), flush=True)
         sys.exit(1)
     except Exception as e:
-        # Restore stderr before error handling
-        if not debug_mode and sys.stderr != original_stderr:
-            try:
-                sys.stderr.close()
-            except Exception:
-                pass
-            sys.stderr = original_stderr
-
         # Capture full traceback
         tb = traceback.format_exc()
         short_exc = str(e)
@@ -460,7 +506,6 @@ async def main():
 def _get_ollama_base_url(url: Optional[str]) -> str:
     """
     Ensure Ollama base URL ends with /v1, appending if missing.
-    @@vessel-protocol:Heimdall governs:validation context:Ollama base URL normalization
     """
     if not url:
         return 'http://localhost:11434/v1'
@@ -475,12 +520,11 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
     Create embedder client based on config.embedder_provider.
     This allows mixing LLM and embedding providers (e.g., Google AI LLM + OpenAI embeddings).
 
-    Added lightweight runtime diagnostics when debug=True:
-    - Logs configured embedding_dim and model
-    - Attempts a single sample embedding call (if embedder exposes an async `embed` method)
-        to validate returned vector length matches configured embedding_dim. This surface
-        mismatches early and produces clearer logs instead of downstream Neo4j dimension errors.
-    @@vessel-protocol:Heimdall governs:debug context:Embedder diagnostics for Ollama/embedding-dimension mismatches
+    graphiti_core's EmbedderConfig.embedding_dim defaults to a frozen 1024, and
+    OpenAIEmbedder/VoyageAIEmbedder slice every real API response to it client-side --
+    silently truncating any model with a native output >1024D unless embedding_dim is
+    passed explicitly. NO_TRUNCATION_EMBEDDING_DIM below makes that slice a permanent
+    no-op so callers always get the embedder's true native output length. See Day79.01.
     """
     logger = logging.getLogger('graphiti_bridge.sync')
 
@@ -489,10 +533,20 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
 
     # Create embedder client based on provider
     if config.embedder_provider == "openai":
-        # OpenAI Embedder
+        # OpenAI Embedder. NOTE: also fixes a separate, adjacent bug found while fixing the
+        # above - this branch previously passed `model=config.embedding_model`, but
+        # OpenAIEmbedderConfig's field is named `embedding_model`, not `model`. Pydantic
+        # BaseModel silently drops unknown kwargs (verified: constructing
+        # OpenAIEmbedderConfig(api_key=..., model=...) leaves embedding_model at its class
+        # default 'text-embedding-3-small' with NO error), so every OpenAI-provider sync
+        # ignored the user's configured embedding model entirely. Distinct defect from the
+        # 1024D truncation bug - documented separately, fixed here since it is the same
+        # three lines.
+        OpenAIEmbedder, OpenAIEmbedderConfig = get_openai_embedder()
         embedder_config = OpenAIEmbedderConfig(
             api_key=embedder_api_key,
-            model=config.embedding_model
+            embedding_model=config.embedding_model,
+            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
         )
         embedder = OpenAIEmbedder(config=embedder_config)
 
@@ -509,7 +563,11 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         embedder = GeminiEmbedder(config=embedder_config)
 
     elif config.embedder_provider == "voyage":
-        # Voyage AI Embedder
+        # Voyage AI Embedder. Same 1024D client-side truncation bug as the openai branch
+        # above (VoyageAIEmbedder.create()/.create_batch() also slice via
+        # `[: self.config.embedding_dim]` - ../graphiti/graphiti_core/embedder/voyage.py) -
+        # fixed identically, not part of the reported incident but the same failure class
+        # in the same function, per the "anywhere else" instruction.
         if not VOYAGE_EMBEDDER_AVAILABLE or VoyageAIEmbedder is None:
             raise NotImplementedError(
                 f"Voyage embedder requested but not available. Install with: pip install voyageai")
@@ -517,7 +575,8 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         # Use VoyageAIEmbedderConfig format (from test file)
         embedder_config = VoyageAIEmbedderConfig(
             api_key=embedder_api_key,
-            model=config.embedding_model
+            model=config.embedding_model,
+            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
         )
         embedder = VoyageAIEmbedder(config=embedder_config)
 
@@ -537,28 +596,37 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         )
 
     elif config.embedder_provider == "ollama":
-        # @@vessel-protocol:Heimdall governs:validation context:Ollama embedder provider integration via OpenAI embedder
         # Ollama Embedder (Local) - uses OpenAI embedder with custom base_url per Graphiti docs
-        if not OPENAI_EMBEDDER_AVAILABLE or OpenAIEmbedder is None:
-            raise NotImplementedError(
-                f"Ollama embedder requested but OpenAI embedder not available. Install with: pip install graphiti-core")
+        OpenAIEmbedder, OpenAIEmbedderConfig = get_openai_embedder()
 
-        # Use OpenAI embedder with Ollama base URL (official Graphiti pattern)
+        # Use OpenAI embedder with Ollama base URL (official Graphiti pattern). Same
+        # client-side truncation risk as the openai/voyage/openrouter branches (an
+        # Ollama model like mxbai-embed-large outputs 1024D, exceeding the 768D
+        # config.ollama_embedding_dim default) -- pass the no-truncation sentinel here
+        # too so the real native output length is always returned. See Day79.01 and
+        # Day81.02 Task 4.
         ollama_base_url = _get_ollama_base_url(
             getattr(config, 'ollama_base_url', None))
         embedder_config = OpenAIEmbedderConfig(
             api_key="ollama",  # Placeholder API key as per Graphiti docs
             embedding_model=config.embedding_model,  # Corrected parameter name
-            embedding_dim=getattr(config, 'ollama_embedding_dim', 768),
+            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
             base_url=ollama_base_url
         )
         embedder = OpenAIEmbedder(config=embedder_config)
 
     elif config.embedder_provider == "openrouter":
-        # OpenRouter Embedder — OpenAI-compatible endpoint with custom base_url
+        # OpenRouter Embedder — OpenAI-compatible endpoint with custom base_url.
+        # This is the exact branch that produced the "openrouter/openai/text-embedding-3-small
+        # produces 1024D" incident - see create_embedder_client() docstring for the full
+        # root-cause writeup (graphiti_core's shared, frozen EmbedderConfig.embedding_dim
+        # default of 1024, silently truncating OpenAIEmbedder's real API response on every
+        # call because this branch never passed embedding_dim explicitly).
+        OpenAIEmbedder, OpenAIEmbedderConfig = get_openai_embedder()
         embedder_config = OpenAIEmbedderConfig(
             api_key=embedder_api_key,
             embedding_model=config.embedding_model,
+            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
             base_url="https://openrouter.ai/api/v1"
         )
         embedder = OpenAIEmbedder(config=embedder_config)
@@ -568,57 +636,9 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         raise NotImplementedError(
             f"Embedder provider '{config.embedder_provider}' is not supported. Supported: openai, google, voyage, azure, ollama, openrouter")
 
-    # ---- Diagnostics (debug-only) ----
     if debug:
-        try:
-            # Log configured embedding dimension if available on config object
-            logger.debug(
-                f"Embedder: {config.embedder_provider} model={config.embedding_model}")
-        except Exception:
-            logger.debug(
-                "[EMBEDDER-DEBUG] Could not read embedder_config for diagnostic logging")
-
-        # If the embedder exposes an async embed method, attempt a single sample to get returned vector length.
-        # Wrap in try/except to avoid breaking initialization if network/permissions fail.
-        try:
-            # Many Graphiti embedders implement either `embed` or `embed_documents` async methods.
-            sample_call = None
-            if hasattr(embedder, 'embed') and asyncio.iscoroutinefunction(embedder.embed):
-                sample_call = embedder.embed(["diagnostic test"])
-            elif hasattr(embedder, 'embed_documents') and asyncio.iscoroutinefunction(embedder.embed_documents):
-                sample_call = embedder.embed_documents(["diagnostic test"])
-            elif hasattr(embedder, 'embed') and not asyncio.iscoroutinefunction(embedder.embed):
-                # sync embed
-                vecs = embedder.embed(["diagnostic test"])
-                if isinstance(vecs, list) and len(vecs) > 0 and isinstance(vecs[0], (list, tuple)):
-                    logger.debug(
-                        f"[EMBEDDER-DEBUG] Sample embedding length (sync): {len(vecs[0])}")
-            if sample_call is not None:
-                # Run the coroutine to completion (safe in initialization context)
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = None
-                if loop and loop.is_running():
-                    # We're in an event loop — schedule task and await it
-                    # Create task and wait synchronously with asyncio.run_coroutine_threadsafe if running in different thread
-                    import concurrent.futures
-                    import threading
-                    fut = asyncio.run_coroutine_threadsafe(sample_call, loop)
-                    vecs = fut.result(timeout=10)
-                else:
-                    # Safe to run with asyncio.run
-                    vecs = asyncio.run(sample_call)
-                if isinstance(vecs, list) and len(vecs) > 0 and isinstance(vecs[0], (list, tuple)):
-                    logger.debug(
-                        f"[EMBEDDER-DEBUG] Sample embedding length (async): {len(vecs[0])}")
-                else:
-                    logger.debug(
-                        f"[EMBEDDER-DEBUG] Sample embedding returned type: {type(vecs)}")
-        except Exception as e:
-            logger.debug(
-                f"[EMBEDDER-DEBUG] Sample embedding diagnostic failed: {e}")
-    # ---- End diagnostics ----
+        logger.debug(
+            f"Embedder: {config.embedder_provider} model={config.embedding_model}")
 
     return embedder
 
@@ -676,8 +696,6 @@ async def check_dimension_compatibility(graphiti, config: 'BridgeConfig', logger
         logger.debug(f"[DIM-CHECK] Dimension check skipped: {e}")
         return True, None, None
 
-    return embedder
-
 
 def _make_noop_cross_encoder():
     """
@@ -689,6 +707,7 @@ def _make_noop_cross_encoder():
     """
     from graphiti_core.llm_client.config import LLMConfig
 
+    OpenAIRerankerClient = get_openai_reranker_client()
     noop = OpenAIRerankerClient(config=LLMConfig(api_key="noop", model="noop"))
 
     async def rank(query: str, passages: list, top_k=None):
@@ -737,7 +756,6 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.info(
                     f"OpenAI LLM: {config.llm_model}, Embedder: {config.embedder_provider}")
 
-            # @@vessel-protocol:Heimdall governs:validation context:OpenAI model compatibility for reasoning parameters (Graphiti 0.19.0+ fix)
             # Check if the model supports reasoning parameters (o1-series models only)
             is_reasoning_model = any(config.llm_model.startswith(
                 p) for p in ('o1-', 'o1_', 'o3-', 'o3_'))
@@ -778,6 +796,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                     logger.debug(
                         f"Using standard GPT model {config.llm_model} - excluding reasoning/verbosity parameters")
 
+            OpenAIClient = get_openai_client()
             llm_client = OpenAIClient(**client_params)
 
             cross_encoder = _make_noop_cross_encoder()
@@ -795,6 +814,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 small_model=getattr(config, 'llm_small_model', None),
                 base_url=getattr(config, 'llm_base_url', None)
             )
+            GeminiClient = get_gemini_client()
             llm_client = GeminiClient(config=llm_config)
             if debug:
                 logger.info(
@@ -815,6 +835,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 small_model=getattr(config, 'llm_small_model', None),
                 base_url=getattr(config, 'llm_base_url', None)
             )
+            AnthropicClient = get_anthropic_client()
             llm_client = AnthropicClient(config=llm_config)
             if debug:
                 logger.info(
@@ -824,12 +845,12 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
         elif config.llm_provider == "ollama":
             # ===== OLLAMA PROVIDER =====
-            # @@vessel-protocol:Bifrost governs:integration context:Ollama LLM client configuration using OpenAI-compatible endpoint
             if debug:
                 logger.info(
                     f"Initializing Ollama provider - LLM: {config.llm_model}, Embedder: {config.embedder_provider} {config.embedding_model}")
 
             # Create Ollama LLM client using OpenAIGenericClient per Graphiti docs
+            OllamaGenericClient, ensure_bounded_ollama_model, DERIVATIVE_STATE_FILENAME = get_ollama_client()
             ollama_base_url = _get_ollama_base_url(
                 getattr(config, 'ollama_base_url', None))
             # For Ollama, ignore llm_small_model to improve structured JSON reliability
@@ -838,12 +859,10 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 logger.debug(
                     "Ollama provider: ignoring llm_small_model for structured JSON reliability")
 
-            # Day78.04b (Issue #20) correction: extra_body.num_ctx is NOT honored by
-            # Ollama's own OpenAI-compat endpoint (live-verified against Ollama 0.32.1 —
-            # see ollama_client.py docstring). Pre-create a bounded-context derivative
-            # model instead — this is the mechanism that actually reduces real Ollama
-            # memory reservation. Soft-fails to the base model (unbounded) on any error
-            # so a broken Ollama /api/create call never blocks a sync.
+            # Ollama's OpenAI-compat endpoint does not honor extra_body.num_ctx (verified
+            # against Ollama 0.32.1) -- pre-create a bounded-context derivative model
+            # instead. Soft-fails to the unbounded base model on any error so a broken
+            # /api/create call never blocks a sync. See Day78.04b.
             ollama_num_ctx = int(getattr(config, 'ollama_num_ctx', 8192))
             ollama_llm_model = config.llm_model
             try:
@@ -867,9 +886,8 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 small_model=ollama_small,
                 base_url=ollama_base_url
             )
-            # Day78.04 (Issue #20): OllamaGenericClient (local subclass of
-            # OpenAIGenericClient) bounds call timeout, and still passes num_ctx via
-            # extra_body for non-Ollama OpenAI-compat backends that honor it.
+            # OllamaGenericClient bounds call timeout and still passes num_ctx via
+            # extra_body for non-Ollama backends that honor it. See Day78.04.
             llm_client = OllamaGenericClient(
                 config=llm_config,
                 num_ctx=ollama_num_ctx,
@@ -895,6 +913,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 small_model=getattr(config, 'llm_small_model', None),
                 base_url=venice_base
             )
+            OpenAIGenericClient = get_openai_generic_client()
             llm_client = OpenAIGenericClient(config=llm_config)
             if debug:
                 logger.info(
@@ -944,6 +963,7 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
                 base_url=openrouter_base
             )
             # Use custom OpenRouter client for proper structured output handling
+            OpenRouterClient = get_openrouter_client()
             llm_client = OpenRouterClient(config=llm_config)
             if debug:
                 logger.info("Using custom OpenRouter client for proper structured output support")
@@ -964,33 +984,63 @@ async def initialize_graphiti(config: BridgeConfig, debug: bool = False):
 
         if db_type == 'falkordb':
             # ===== FALKORDB DRIVER =====
+            # Day86.02: get_falkor_driver() returns PinnedGraphFalkorDriver, a
+            # graphiti_bridge subclass of graphiti_core's FalkorDriver whose clone()
+            # ignores its database argument and always returns self. This is the
+            # single choke point that neutralizes BOTH graphiti-core's add_episode/
+            # add_episode_bulk-level reclone (graphiti_core/graphiti.py) AND every
+            # FalkorDB ops file's independent get_by_group_ids() reclone -- both call
+            # driver.clone(database=...) on this instance. Every FalkorDriver(...)
+            # construction below therefore already produces a pinned driver; no
+            # change to build_falkor_connection()'s connection-kwargs plumbing was
+            # needed for this. See lazy_imports.get_falkor_driver().
+            FalkorDriver, FALKORDB_AVAILABLE = get_falkor_driver()
             if not FALKORDB_AVAILABLE or FalkorDriver is None:
                 raise NotImplementedError(
                     f"FalkorDB driver requested but not available. Install with: pip install graphiti-core[falkordb]")
 
-            # Parse redis URL format (redis://host:port)
-            import re
-            match = re.match(r'redis://([^:]+):(\d+)', config.database_url)
-            if match:
-                host, port = match.groups()
-            else:
-                # Default fallback
-                host, port = 'localhost', '6379'
+            # Day86.01: connection kwargs now built by the single shared helper also
+            # used by test_connections.py's probe (see build_falkor_connection()
+            # docstring). Host/port regex parity with the original inline version is
+            # preserved inside that helper.
+            conn = build_falkor_connection(config)
+            db_name = getattr(config, 'database_name', 'default_db') or 'default_db'
 
             if debug:
                 logger.info(
-                    f"Creating FalkorDB driver: {host}:{port} database={getattr(config, 'database_name', 'graphiti')}")
+                    f"Creating FalkorDB driver: {conn['host']}:{conn['port']} "
+                    f"ssl={conn['ssl']} database={db_name}")
 
-            driver = FalkorDriver(
-                host=host,
-                port=int(port),
-                username=config.database_username or None,
-                password=config.database_password or None,
-                database=getattr(config, 'database_name',
-                                 'default_db') or 'default_db'
-            )
+            if conn['ssl']:
+                # No ssl kwarg exists on FalkorDriver itself -- pre-construct the raw
+                # falkordb-py client with TLS enabled and hand it in via the falkor_db=
+                # escape hatch. Confirmed safe: FalkorDriver never reconstructs
+                # self.client outside __init__.
+                FalkorDB = get_falkordb_client()
+                falkor_db_instance = FalkorDB(
+                    host=conn['host'],
+                    port=conn['port'],
+                    username=conn['username'],
+                    password=conn['password'],
+                    ssl=True,
+                )
+                driver = FalkorDriver(
+                    falkor_db=falkor_db_instance,
+                    database=db_name
+                )
+            else:
+                # No TLS requested -- construct FalkorDriver directly exactly as before
+                # Day86.01, so existing no-TLS/no-auth local Docker setups are unaffected.
+                driver = FalkorDriver(
+                    host=conn['host'],
+                    port=conn['port'],
+                    username=conn['username'],
+                    password=conn['password'],
+                    database=db_name
+                )
         else:
             # ===== NEO4J DRIVER (DEFAULT) =====
+            Neo4jDriver = get_neo4j_driver()
 
             driver = Neo4jDriver(
                 uri=config.database_url,
@@ -1047,56 +1097,13 @@ async def init_graphiti_bridge(config: BridgeConfig, debug: bool = False):
 
 def extract_episode_uuid_from_result(graphiti_result, debug_mode: bool, logger) -> Optional[str]:
     """
-    Extract episode UUID from Graphiti result
+    Extract the episode UUID from an AddEpisodeResults. graphiti-core 0.29.x's
+    AddEpisodeResults.episode is a required EpisodicNode with a required uuid field --
+    always present (verified against graphiti_core.graphiti.AddEpisodeResults).
     """
     if not graphiti_result:
         return None
-
-    episode_uuid = None
-
-    # Try to extract episode UUID from various possible locations
-    if hasattr(graphiti_result, 'episode') and graphiti_result.episode:
-        episode_obj = graphiti_result.episode
-        if hasattr(episode_obj, 'uuid'):
-            episode_uuid = str(episode_obj.uuid)
-        elif hasattr(episode_obj, 'id'):
-            episode_uuid = str(episode_obj.id)
-        elif hasattr(episode_obj, '__dict__'):
-            # Look for UUID fields in episode object
-            for key, value in episode_obj.__dict__.items():
-                if 'uuid' in key.lower() or 'id' in key.lower():
-                    if value:
-                        episode_uuid = str(value)
-                        if debug_mode:
-                            logger.debug(
-                                f"Found episode UUID in episode.{key}: {episode_uuid}")
-                        break
-    elif hasattr(graphiti_result, 'episode_uuid'):
-        episode_uuid = str(graphiti_result.episode_uuid)
-    elif hasattr(graphiti_result, 'uuid'):
-        episode_uuid = str(graphiti_result.uuid)
-    elif hasattr(graphiti_result, 'id'):
-        episode_uuid = str(graphiti_result.id)
-
-    if not episode_uuid:
-        # Debug: log available attributes to help find UUID
-        if debug_mode:
-            available_attrs = [attr for attr in dir(
-                graphiti_result) if not attr.startswith('_')]
-            logger.debug(
-                f"No UUID found in result. Available attributes: {available_attrs}")
-
-        # Look for UUID in nested objects
-        if hasattr(graphiti_result, '__dict__'):
-            for key, value in graphiti_result.__dict__.items():
-                if 'uuid' in key.lower() or 'id' in key.lower():
-                    if debug_mode:
-                        logger.debug(
-                            f"Found potential UUID field: {key} = {value}")
-                    if not episode_uuid and value:
-                        episode_uuid = str(value)
-
-    return episode_uuid
+    return str(graphiti_result.episode.uuid)
 
 
 async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -> Optional[Dict[str, Any]]:
@@ -1312,17 +1319,6 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
             episode_uuid = extract_episode_uuid_from_result(
                 graphiti_result, debug_mode, logger)
 
-            # DON'T include the full graphiti result - it's MASSIVE and breaks the pipe
-            # Just include essential info
-            clean_graphiti_data = {
-                'episode_uuid': episode_uuid,
-                'entities_count': entities_count,
-                'relationships_count': relationships_count,
-                'embed_tokens_est': len(clean_text) // 4,
-            }
-
-            # Graphiti result structure logging removed (not useful in production)
-
             if debug_mode:
                 logger.info(
                     f"Successfully processed '{note_name}' with namespace '{group_id}': {entities_count} entities, {relationships_count} relationships")
@@ -1449,84 +1445,9 @@ async def process_note(note_path: str, graphiti, logger, config: BridgeConfig) -
             }
 
         if debug_mode:
-            logger.error(f"Failed to process note {note_path}: {e}")
+            logger.exception(f"Failed to process note {note_path}: {e}")
         # Re-raise to be caught by the calling main function
         raise
-
-
-def serialize_graphiti_result(result) -> Dict[str, Any]:
-    """
-    Convert Graphiti result to JSON-serializable format, removing embeddings
-    """
-    if not result:
-        return {}
-
-    serialized = {}
-
-    # Handle different result types
-    if hasattr(result, '__dict__'):
-        for key, value in result.__dict__.items():
-            serialized[key] = serialize_value(value)
-
-    return serialized
-
-
-# REDUCED to prevent massive output
-def serialize_value(value, seen=None, depth=0, max_depth=3):
-    """
-    Recursively serialize a value to JSON-serializable format with circular reference protection.
-    """
-    from datetime import datetime, date
-
-    if seen is None:
-        seen = set()
-
-    # Prevent infinite recursion while ensuring sufficient depth for expected output
-    if depth > max_depth:
-        return f"[max_depth_exceeded_{type(value).__name__}]"
-
-    # Handle circular references
-    if hasattr(value, '__dict__') and id(value) in seen:
-        return f"[circular_reference_{type(value).__name__}]"
-
-    if value is None:
-        return None
-    elif isinstance(value, (datetime, date)):
-        return value.isoformat()
-    elif isinstance(value, str):
-        return value
-    elif isinstance(value, (int, float, bool)):
-        return value
-    elif isinstance(value, list):
-        return [serialize_value(item, seen, depth + 1, max_depth) for item in value]
-    elif isinstance(value, dict):
-        return {k: serialize_value(v, seen, depth + 1, max_depth) for k, v in value.items()}
-    elif hasattr(value, '__dict__'):
-        # Add to seen set to detect circular references
-        seen.add(id(value))
-
-        # Handle object with attributes
-        result = {}
-        obj_dict = value.__dict__
-
-        for key, val in obj_dict.items():
-            if key.endswith('_embedding'):
-                # Replace embeddings with placeholder
-                result[key] = f"[embedding_vector_length_{len(val) if isinstance(val, list) else 'unknown'}]"
-            elif key.startswith('_'):
-                # Skip truly private/internal attributes to reduce noise
-                if key not in ['_driver', '_session', '_llm_client', '_embedder', '_graph_driver']:
-                    result[key] = serialize_value(
-                        val, seen.copy(), depth + 1, max_depth)
-            else:
-                result[key] = serialize_value(
-                    val, seen.copy(), depth + 1, max_depth)
-
-        return result
-    else:
-        # For any other type, convert to string (limit string length if it can be huge)
-        string_representation = str(value)
-        return string_representation[:2000] if len(string_representation) > 2000 else string_representation
 
 
 def strip_wikilink_paths(text: str) -> str:
@@ -1552,7 +1473,8 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
     """Create a generic text episode using EpisodeType.text"""
 
     try:
-        # FALKORDB FIX: Use timezone-aware datetime and handle group_id compatibility
+        # FalkorDB (RedisGraph-family) rejects/mishandles naive (tz-unaware) datetimes;
+        # Neo4j tolerates them. No upstream issue tracks this. See Day79.02 Task 4.
         if isinstance(reference_time, datetime):
             # Convert to timezone-aware datetime for FalkorDB compatibility
             if reference_time.tzinfo is None:
@@ -1602,7 +1524,7 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
             frontmatter_lines = ["---"]
             for k, v in filtered_metadata.items():
                 if isinstance(v, (dict, list)):
-                    val = json.dumps(v)
+                    val = json.dumps(v, default=str)
                 else:
                     val = str(v)
                 frontmatter_lines.append(f"{k}: {val}")
@@ -1623,8 +1545,12 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
             'source_description': source_description,
             'reference_time': formatted_reference_time
         }
-        # Do not attach separate frontmatter field anymore; frontmatter is merged into body
-        if database_type.lower() == 'neo4j':
+        # group_id passed for all backends (previously Neo4j-only; FalkorDB episodes
+        # landed in one undifferentiated graph). Omitted only when empty, since an
+        # explicit '' clones a distinct empty-string-named graph on FalkorDB, while
+        # omitting the kwarg keeps writes on the driver's configured database on both
+        # backends. See Day79.02 Task 4.
+        if group_id:
             episode_kwargs['group_id'] = group_id
 
         # Phase 3 token-cost fix: cap prior episode context (v0.29.0 upgrade).
@@ -1657,21 +1583,94 @@ async def create_generic_text_episode(graphiti, note_name: str, clean_text: str,
         # Create episode with database-specific parameters
         result = await graphiti.add_episode(**episode_kwargs)
 
-        # Force transaction commit if available
-        if hasattr(graphiti, '_driver') and graphiti._driver:
-            # Graphiti should handle commits internally, but let's verify
-            try:
-                # Check if there's a session or transaction we can explicitly commit
-                if hasattr(graphiti, '_session') and graphiti._session:
-                    await graphiti._session.commit()
-            except Exception:
-                pass  # Silent - no explicit commit needed or available
-
         return result
 
-    except Exception as e:
-        # Only log if in a debug context - for now, just re-raise
+    except Exception:
         raise
+
+
+def resolve_dynamic_rule(metadata: Optional[Dict[str, Any]], config) -> Optional[Dict[str, Any]]:
+    """Resolve which Dynamic Ontology Rule (Day59.01) applies to this note.
+
+    Evaluates config.dynamic_rules top to bottom, first match wins. A rule matches when
+    its matchField is the wildcard '*' (or its matchValues contains '*'), or when
+    metadata[matchField] is present in matchValues. Disabled rules are skipped.
+
+    Returns None when dynamic_rules is absent/empty or no rule matches — callers must treat
+    None as "no filtering" (byte-identical to pre-Day59.01 behaviour), not as an error.
+    """
+    rules = getattr(config, 'dynamic_rules', None) if config is not None else None
+    if not rules:
+        return None
+
+    for rule in rules:
+        if not rule.get('enabled', True):
+            continue
+        match_field = rule.get('matchField') or rule.get('match_field')
+        match_values = rule.get('matchValues') or rule.get('match_values') or []
+        if match_field == '*' or '*' in match_values:
+            return rule
+        if not match_field:
+            continue
+        field_value = metadata.get(match_field) if isinstance(metadata, dict) else None
+        if field_value is not None and str(field_value) in match_values:
+            return rule
+
+    return None
+
+
+def apply_dynamic_rule_filter(entity_types: Dict[str, Any], edge_types: Dict[str, Any],
+                               edge_type_map: Dict[tuple, List[str]], rule: Dict[str, Any],
+                               logger) -> tuple:
+    """Filter entity_types/edge_types/edge_type_map per the resolved Dynamic Ontology Rule
+    (Day59.01) before they reach graphiti.add_episode().
+
+    Axes (per Day59.01 DevDoc — property filtering is explicitly OUT of scope):
+      1. includedEntityTypes — None means include all (including 'BaseEntity', a MegaMem-only
+         construct synthesized in models.py, not a graphiti-core requirement).
+      2. includedEdgeTypes — None means include all.
+      3. edge_type_map filtered to pairs where both source and target survive axis 1 — EXCEPT
+         wildcard 'X -> Entity' entries, which survive whenever X survives. 'Entity' is
+         graphiti-core's universal base label (every node carries it in addition to its custom
+         type), not a real compiled entity type — it must never be required to independently
+         survive axis 1, and a literal ('Entity', 'Entity') entry must never be synthesized here
+         (it would match every node pair and defeat the filter).
+    """
+    included_entity_types = rule.get('includedEntityTypes')
+    included_edge_types = rule.get('includedEdgeTypes')
+
+    if included_entity_types is None:
+        filtered_entity_types = entity_types
+    else:
+        allowed_entities = set(included_entity_types)
+        filtered_entity_types = {k: v for k, v in entity_types.items() if k in allowed_entities}
+
+    if included_edge_types is None:
+        filtered_edge_types = edge_types
+    else:
+        allowed_edges = set(included_edge_types)
+        filtered_edge_types = {k: v for k, v in edge_types.items() if k in allowed_edges}
+
+    if included_entity_types is None:
+        filtered_edge_type_map = edge_type_map
+    else:
+        allowed_entities = set(included_entity_types)
+        filtered_edge_type_map = {}
+        for (source, target), edges in edge_type_map.items():
+            source_survives = source in allowed_entities
+            # Wildcard preservation: 'Entity' target survives whenever the source survives.
+            target_survives = (target == 'Entity') or (target in allowed_entities)
+            if source_survives and target_survives:
+                filtered_edge_type_map[(source, target)] = edges
+
+    logger.info(
+        f"Dynamic Ontology Rule '{rule.get('name', rule.get('id', '?'))}' applied: "
+        f"entity_types {len(entity_types)}->{len(filtered_entity_types)}, "
+        f"edge_types {len(edge_types)}->{len(filtered_edge_types)}, "
+        f"edge_type_map {len(edge_type_map)}->{len(filtered_edge_type_map)}"
+    )
+
+    return filtered_entity_types, filtered_edge_types, filtered_edge_type_map
 
 
 async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str,
@@ -1682,7 +1681,8 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
     """Create a custom entity episode using Graphiti Custom Entities API"""
 
     try:
-        # FALKORDB FIX: Use timezone-aware datetime and handle group_id compatibility
+        # FalkorDB (RedisGraph-family) rejects/mishandles naive (tz-unaware) datetimes;
+        # Neo4j tolerates them. No upstream issue tracks this. See Day79.02 Task 4.
         if isinstance(reference_time, datetime):
             # Convert to timezone-aware datetime for FalkorDB compatibility
             if reference_time.tzinfo is None:
@@ -1697,6 +1697,16 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
         entity_types = get_graphiti_entity_types()
         edge_types = get_graphiti_edge_types()
         edge_type_map = get_graphiti_edge_type_map()
+
+        # Dynamic Ontology Rules (Day59.01) — narrow the ontology actually sent to add_episode()
+        # per note type, before the "no entity types" fallback below so the check reflects what
+        # will really be sent. resolve_dynamic_rule() returns None when dynamic_rules is
+        # absent/empty or nothing matches — filtering is skipped entirely in that case, which is
+        # byte-identical to pre-Day59.01 behaviour.
+        dynamic_rule = resolve_dynamic_rule(metadata, config)
+        if dynamic_rule is not None:
+            entity_types, edge_types, edge_type_map = apply_dynamic_rule_filter(
+                entity_types, edge_types, edge_type_map, dynamic_rule, logger)
 
         # No custom entity types available, fall back to generic episode
         if not entity_types:
@@ -1740,7 +1750,7 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
             frontmatter_lines = ["---"]
             for k, v in filtered_metadata.items():
                 if isinstance(v, (dict, list)):
-                    val = json.dumps(v)
+                    val = json.dumps(v, default=str)
                 else:
                     val = str(v)
                 frontmatter_lines.append(f"{k}: {val}")
@@ -1765,8 +1775,10 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
             'edge_type_map': edge_type_map
         }
 
-        # Add group_id only for Neo4j (FalkorDB doesn't support it)
-        if database_type.lower() == 'neo4j':
+        # group_id passed for all backends (previously Neo4j-only; FalkorDB episodes
+        # landed in one undifferentiated graph). Omitted only when empty -- see the
+        # matching comment at the create_generic_text_episode site above. See Day79.02 Task 4.
+        if group_id:
             episode_kwargs['group_id'] = group_id
 
         # Phase 3 token-cost fix: cap prior episode context (v0.29.0 upgrade).
@@ -1801,14 +1813,13 @@ async def create_custom_entity_episode(graphiti, note_name: str, clean_text: str
 
         return result
 
-    except Exception as e:
-        import traceback
-
-        if hasattr(logger, 'warning'):
-            logger.warning(
-                f"Custom entity episode creation failed: {e}, falling back to generic episode")
-
-        return await create_generic_text_episode(graphiti, note_name, clean_text, reference_time, group_id, logger, database_type, config, custom_extraction_instructions=custom_extraction_instructions, saga_name=saga_name, saga_previous_uuid=saga_previous_uuid)
+    except Exception:
+        # Day81.02 Task 1: no silent fallback -- a custom-entity episode failure must
+        # not degrade to a generic episode missing ontology typing, frontmatter, and
+        # mm_note_path/mm_vault_id/mm_obsidian_url back-references while still
+        # reporting success. Re-raise so process_note()'s exception handling marks
+        # the note status: failed.
+        raise
 
 
 def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeConfig, logger) -> str:
@@ -1871,9 +1882,10 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
 
         # 3. Namespace strategy (lowest priority)
         if config.namespace_strategy == 'vault':
-            # Extract vault name from note path or use default
+            # Resolve the actual vault name from config.vault_path (Day86.02 Task 2 fix —
+            # previously this echoed default_namespace verbatim and never looked at the vault)
             vault_name = _extract_vault_name_from_path(
-                note_path, config.default_namespace, debug_mode, logger)
+                note_path, getattr(config, 'vault_path', None), config.default_namespace, debug_mode, logger)
             if debug_mode:
                 logger.debug(f"Using vault namespace: {vault_name}")
             return vault_name
@@ -1892,26 +1904,48 @@ def resolve_namespace(note_path: str, metadata: Dict[str, Any], config: BridgeCo
                     f"Using default namespace: {config.default_namespace}")
             return config.default_namespace
 
-    except Exception as e:
-        if debug_mode:
-            logger.warning(f"Error resolving namespace for {note_path}: {e}")
-            logger.debug(
-                f"Falling back to default namespace: {config.default_namespace}")
-        return config.default_namespace
+    except Exception:
+        # Day81.02 Task 5: group_id is the partition boundary and the only permissible
+        # publish predicate -- silently routing a note to default_namespace on any
+        # resolution error while still reporting success is a defect, not a safety net.
+        # Fail loudly so process_note()'s caller reports status: failed instead.
+        raise
 
 
-def _extract_vault_name_from_path(note_path: str, default_namespace: str, debug_mode: bool, logger) -> str:
+def _extract_vault_name_from_path(note_path: str, vault_path: Optional[str], default_namespace: str, debug_mode: bool, logger) -> str:
     """
-    Extract vault name from note path or return default namespace.
-    For vault strategy, we want just the vault name, not the full path.
+    Resolve the real vault name for the 'vault' namespace strategy.
+
+    Day86.02 Task 2: this previously ignored note_path/vault_path entirely and just
+    echoed default_namespace back, making the 'vault' strategy a passthrough and the
+    multi-vault case impossible (two vaults sharing one config collapsed to the same
+    group_id). It now derives the vault name from config.vault_path using the same
+    Path(vault_path_str).name pattern already used elsewhere in this file for
+    mm_vault_id / mm_obsidian_url construction (see episode_meta build, ~line 1244-1245),
+    so it actually resolves vault identity rather than passing through whatever
+    default_namespace happens to be configured.
     """
     try:
-        # For vault strategy, use the provided default_namespace directly
-        # This should be the vault name from settings
+        vault_path_str = (vault_path or '').replace('\\', '/').rstrip('/')
+        if vault_path_str:
+            vault_name = Path(vault_path_str).name
+            if vault_name:
+                if debug_mode:
+                    logger.debug(f"Resolved vault name '{vault_name}' from vault_path")
+                return vault_name
+
+        # vault_path is genuinely unavailable (or resolved to an empty name) at this
+        # call site -- say so explicitly rather than silently falling back to
+        # default_namespace as if it were a real vault-name resolution.
+        logger.warning(
+            f"namespace_strategy='vault' but no usable vault_path was available to "
+            f"resolve the vault name for note_path={note_path!r} (vault_path={vault_path!r}); "
+            f"falling back to default_namespace={default_namespace!r} instead of the "
+            f"actual vault name."
+        )
         return default_namespace
     except Exception as e:
-        if debug_mode:
-            logger.warning(f"Error extracting vault name: {e}")
+        logger.warning(f"Error extracting vault name from vault_path={vault_path!r}: {e}")
         return default_namespace
 
 
@@ -2109,12 +2143,12 @@ def extract_reference_time(metadata: Dict[str, Any], logger, database_type: str 
     # Use current time if no reference time found
     if not reference_time:
         if database_type == 'falkordb':
-            # FALKORDB FIX: Always use timezone-aware datetime for FalkorDB
+            # FalkorDB rejects/mishandles naive datetimes. See Day79.02 Task 4.
             reference_time = datetime.now(timezone.utc)
         else:
             reference_time = datetime.now()
     else:
-        # FALKORDB FIX: Ensure timezone-aware datetime for FalkorDB compatibility
+        # FalkorDB rejects/mishandles naive datetimes. See Day79.02 Task 4.
         if database_type == 'falkordb' and hasattr(reference_time, 'tzinfo') and reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=timezone.utc)
 

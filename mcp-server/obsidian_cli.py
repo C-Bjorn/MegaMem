@@ -2013,6 +2013,61 @@ class ObsidianCLI:
             return self._err(out or "Sync trigger failed")
         return self._ok({"message": out, "notePath": note_path})
 
+    def trigger_sync_for_database(self, vault: str, note_path: str, database_id: str) -> dict:
+        """
+        Trigger MegaMem sync for a specific note targeting a named database (Day86.04
+        Task 5). Obsidian's command-by-ID transport (trigger_sync above) is
+        argument-less by platform design (Command.callback: () => void), so this
+        bypasses it entirely via the eval CLI transport — the same
+        app.plugins.getPlugin('megamem-mcp') pattern used throughout this file —
+        to call the plugin's already-targetDb-aware SyncStatusManager.enqueue()
+        directly with the resolved DbConfig.
+
+        Fire-and-forget, matching trigger_sync()'s existing async contract
+        ("Sync completes asynchronously after this tool returns" — the tool's own
+        description): database_id/file resolution happen synchronously inside the
+        eval and fail loudly if either is invalid, but the actual enqueue() promise
+        (LLM/embedder/graph-write work, can run well past a CLI timeout) is not
+        awaited — its result is only observed via console.error on failure.
+        """
+        safe_path = note_path.replace("'", "\\'")
+        safe_db_id = database_id.replace("'", "\\'")
+        js = (
+            "(() => {"
+            " const plugin = app.plugins.getPlugin('megamem-mcp');"
+            " if (!plugin) return JSON.stringify({success:false,error:'MegaMem plugin not found'});"
+            f" const dbId = '{safe_db_id}';"
+            " const targetDb = (plugin.settings.databases || []).find(d => d.id === dbId);"
+            " if (!targetDb) return JSON.stringify({success:false,error:\"Database '\" + dbId + \"' not found\"});"
+            f" let file = app.vault.getAbstractFileByPath('{safe_path}');"
+            " if (!file) {"
+            f"   const lastSeg = '{safe_path}'.split('/').pop() || '';"
+            f"   if (!lastSeg.includes('.')) file = app.vault.getAbstractFileByPath('{safe_path}' + '.md');"
+            " }"
+            " if (!file) return JSON.stringify({success:false,error:'File not found'});"
+            " plugin.syncStatusManager.enqueue(file, 'obsidian_mm_individual', targetDb)"
+            "   .catch(e => console.error('[MEGAMEM-SYNC] background sync failed:', e));"
+            " return JSON.stringify({success:true, status:'queued', message:'Sync queued for database ' + dbId});"
+            "})()"
+        )
+        out, code = self._run(vault, "eval", f"code={js}")
+        if self._is_error(out, code):
+            return self._err(out or "Sync trigger failed")
+        # enqueue() runs its synchronous prefix (GraphitiLogger calls like
+        # "MegaMem: Starting sync for...") before yielding at its first await,
+        # even though we don't await the promise ourselves — those log lines land
+        # in stdout ahead of our own "=> {json}" return line. Take the last
+        # non-empty line rather than the whole output.
+        lines = [l for l in out.strip().splitlines() if l.strip()]
+        raw = lines[-1].lstrip("=> ").strip() if lines else ""
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return self._err(f"Unparseable eval response: {raw}")
+        if not result.get("success"):
+            return self._err(result.get("error") or "Sync failed")
+        return self._ok({"message": result.get("message"), "notePath": note_path, "database_id": database_id})
+
     # ─── Bases Tools ─────────────────────────────────────────────────────────────
 
     def list_bases(self, vault: str) -> dict:

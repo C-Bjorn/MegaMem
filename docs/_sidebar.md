@@ -1,10 +1,12 @@
 - Getting Started
   - [Introduction](README.md)
   - [Quick Start](quick-start.md)
+  - [Publishing a Public Graph](publishing.md)
 - Configuration
   - [Plugin Settings](plugin-settings.md)
   - [Ontology Manager](guides/ontology-manager.md)
   - [Sync Manager](guides/sync-manager.md)
+  - [Publish Manager](guides/publish-manager.md)
 - Guides
   - [Database Setup](guides/database-setup.md)
   - [Claude Desktop Integration](guides/claude-integration.md)

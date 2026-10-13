@@ -4,11 +4,12 @@ Utility functions for Graphiti Bridge
 Helper functions for text processing, frontmatter extraction, logging, and response formatting.
 """
 
+import os
 import re
 import json
 import logging
 import sys
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 from datetime import datetime
 
@@ -351,6 +352,139 @@ def print_final_json_response(response_dict: dict):
     json_str = json.dumps(
         response_dict, ensure_ascii=False, separators=(',', ':'))
     print(json_str, flush=True)
+
+
+# Day79.02 Task 2.1 — attribute-length-cap drop instrumentation.
+#
+# graphiti-core's cap_string_attributes() (attribute_utils.py) already computes the
+# set of dropped/retained-over-cap fields but both call sites discard it
+# (`merged, _ = apply_capped_attributes(...)`). It DOES log internally via the
+# `graphiti_core.utils.maintenance.attribute_utils` logger, so rather than patching
+# graphiti_core (disallowed per DevDoc Rev 5 Sec.3), we attach a logging.Handler
+# directly to that logger and surface what it captured in the sync result JSON.
+ATTRIBUTE_CAP_LOGGER_NAME = 'graphiti_core.utils.maintenance.attribute_utils'
+ATTRIBUTE_CAP_ENV_VAR = 'GRAPHITI_ATTRIBUTE_MAX_LENGTH'
+
+
+class AttributeCapCaptureHandler(logging.Handler):
+    """Captures graphiti-core's attribute_length_cap_exceeded /
+    attribute_length_cap_skipped_required log records so drops can be surfaced in the
+    sync result JSON instead of only reaching a log file.
+
+    Reads structured fields from record.args (the values the module passed into its
+    %s-style logger call) rather than regex-parsing the formatted message string.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.INFO)
+        self.records: List[dict] = []
+
+    def clear(self) -> None:
+        self.records = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.msg or ''
+            if msg.startswith('attribute_length_cap_exceeded'):
+                status = 'dropped'
+            elif msg.startswith('attribute_length_cap_skipped_required'):
+                status = 'retained_over_cap_required'
+            else:
+                return
+            args = record.args or ()
+            # record.args is typed by the stdlib logging stubs as
+            # tuple[object, ...] | Mapping[str, object] (CPython substitutes a Mapping
+            # only when a single positional Mapping arg is passed). attribute_utils
+            # always logs 7 positional args, so this is never actually a Mapping at
+            # runtime -- but Pylance can't prove that, since Mapping doesn't support
+            # slicing. Narrow explicitly so args[:7] below is provably iterable.
+            if not isinstance(args, tuple) or len(args) < 7:
+                return
+            prompt_name, group_id, entity_uuid, field_name, reason, length, cap = args[:7]
+            self.records.append({
+                'status': status,
+                'prompt': prompt_name,
+                'group_id': group_id,
+                'entity_uuid': entity_uuid,
+                'field': field_name,
+                'reason': reason,
+                'length': length,
+                'cap': cap,
+            })
+        except Exception:
+            pass  # Capture must never break the sync pipeline.
+
+
+def install_attribute_cap_capture() -> AttributeCapCaptureHandler:
+    """Attach a capture handler directly to graphiti_core's attribute_utils logger.
+
+    Uses the module's own `logger` attribute (not `logging.getLogger(name)`) so this
+    works correctly even when called after `setup_logging()` has monkey-patched
+    `logging.getLogger` to intercept 'graphiti_core'-named loggers for the bridge's own
+    DebugLogger. `cap_string_attributes` logs drops at INFO, so the target logger's
+    level is raised from its default (WARNING, inherited from root) to INFO — otherwise
+    the drop records would never reach any handler at all.
+
+    Safe to call multiple times per process (daemon mode reuses the interpreter across
+    notes) — any previously-installed capture handler is replaced, not stacked.
+    """
+    from graphiti_core.utils.maintenance import attribute_utils as _attribute_utils_mod
+    target_logger = _attribute_utils_mod.logger
+    for existing in list(target_logger.handlers):
+        if isinstance(existing, AttributeCapCaptureHandler):
+            target_logger.removeHandler(existing)
+    handler = AttributeCapCaptureHandler()
+    target_logger.addHandler(handler)
+    target_logger.setLevel(logging.INFO)
+    target_logger.propagate = False
+    return handler
+
+
+def summarize_attribute_cap_drops(handler: Optional[AttributeCapCaptureHandler]) -> dict:
+    """Build the `dropped_attributes` summary attached to the sync result.
+
+    Terminology per DevDoc Rev 4/5: values are DROPPED (absent), never "truncated".
+    """
+    if handler is None:
+        return {
+            'dropped_count': 0,
+            'retained_over_cap_required_count': 0,
+            'dropped': [],
+            'retained_over_cap_required': [],
+        }
+    dropped = [r for r in handler.records if r['status'] == 'dropped']
+    retained = [r for r in handler.records if r['status'] == 'retained_over_cap_required']
+    return {
+        'dropped_count': len(dropped),
+        'retained_over_cap_required_count': len(retained),
+        'dropped': dropped,
+        'retained_over_cap_required': retained,
+    }
+
+
+def verify_attribute_cap_env_effect() -> dict:
+    """Prove the GRAPHITI_ATTRIBUTE_MAX_LENGTH interim mitigation (Day79.02 Task 2.2)
+    actually took effect, rather than assuming it. Calls graphiti-core's own resolver
+    function directly (confirmed to read the env var at call time, not import time)
+    so this is a real assertion of effect, not a re-implementation that could drift.
+    """
+    try:
+        from graphiti_core.utils.maintenance.attribute_utils import (
+            _resolve_default_max_length,
+            DEFAULT_ATTRIBUTE_MAX_LENGTH,
+        )
+        resolved = _resolve_default_max_length(DEFAULT_ATTRIBUTE_MAX_LENGTH)
+        env_raw = os.environ.get(ATTRIBUTE_CAP_ENV_VAR)
+        took_effect = env_raw is not None and str(resolved) == str(int(env_raw))
+        return {
+            'env_var': ATTRIBUTE_CAP_ENV_VAR,
+            'env_value': env_raw,
+            'effective_max_length': resolved,
+            'default_max_length': DEFAULT_ATTRIBUTE_MAX_LENGTH,
+            'took_effect': took_effect,
+        }
+    except Exception as e:
+        return {'error': str(e), 'took_effect': False}
 
 
 def print_error_and_exit(message: str, details: Optional[str] = None, exit_code: int = 1):

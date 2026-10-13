@@ -10,7 +10,7 @@ tags:
   - semantic-search
 sidebar: auto
 date_created: 2025-09-23T11:19
-date_updated: 2026-03-07
+date_updated: 2026-10-13
 ---
 
 # MegaMem
@@ -36,7 +36,8 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 ### Multi-Database Support
 
 - **Neo4j**: Industry-standard graph database for complex relationships
-- **FalkorDB**: High-performance in-memory graph database for speed
+- **FalkorDB**: High-performance in-memory graph database for speed (TLS supported)
+- **Endogon Hosted Graph**: One-click hosted FalkorDB graph for MegaMem Pro members
 - **Kuzu**: Coming soon
 - **Amazon Neptune**: Coming soon
 
@@ -51,18 +52,24 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - Define domain-specific entity types and relationships
 - Flexible schema management
 - Advanced knowledge modeling capabilities
+- **Dynamic Rules**: scope which entity/edge types are sent to extraction per note type
+
+### Publish
+
+- Replicate a chosen namespace to a separate destination database (e.g. Neo4j Aura) without exposing private notes
 
 ### MegaMem Pro
 
 - In-plugin license key validation and content package delivery
 - Install vault templates and ontology packs directly from the Pro settings tab
-- Future: hosted AI services accessible from within Obsidian
+- One-click Endogon Hosted Graph and the `ask_bjorn` MCP support tool
 
 ## Quick Links
 
 - [**5-Minute Setup Guide**](quick-start.md) - Get started immediately
 - [**Plugin Settings**](plugin-settings.md) - Complete configuration reference
-- [**MCP Commands Reference**](mcp-commands.md) - All 19 MCP tools documented
+- [**MCP Commands Reference**](mcp-commands.md) - All 24 MCP tools documented
+- [**Publishing a Public Graph**](publishing.md) - Replicate a namespace to a hosted destination such as Neo4j Aura
 - [**Development Roadmap**](roadmap.md) - Upcoming features and timeline
 
 ## System Requirements

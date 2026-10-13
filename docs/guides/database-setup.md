@@ -11,7 +11,7 @@ tags:
   - installation
 last_updated: 2025-01-23
 date_created: 2025-09-23T11:36
-date_updated: 2025-09-28T11:36
+date_updated: 2026-10-13T00:00
 ---
 
 # Database Setup Guide
@@ -42,6 +42,10 @@ docker run -d \
 - Password: `megamem123`
 - Database Name: `neo4j`
 
+### Neo4j Aura (hosted)
+- URI: `neo4j+s://<instance-id>.databases.neo4j.io`
+- Database Name: the Aura **instance ID**, not `neo4j` (see the [Publish guide](publish-manager.md#setting-up-an-aura-destination))
+
 ## FalkorDB (Alternative)
 
 ### Docker Setup
@@ -66,6 +70,12 @@ redis-cli -h localhost -p 6379 ping
 - Port: `6379`
 - Password: (leave empty)
 - Database Name: `megamem`
+- **Use TLS / SSL**: turn on for TLS-only instances such as FalkorDB Cloud. Host/URL is entered in a single field.
+
+> **Upgrading to v1.8.0 with FalkorDB?** graphiti-core changed its internal default `group_id` for FalkorDB, so data synced before and after the upgrade lives under different namespace values. FalkorDB now enforces real namespace isolation — **re-sync your vault** after upgrading.
+
+### Endogon Hosted Graph (MegaMem Pro)
+Pro members with the hosted-graph entitlement can click **Add graph to MegaMem** in Plugin Settings → ✦ MegaMem Pro → Hosted Graph (or choose **Endogon** as the Type when adding a database). Connection details are fetched automatically; use **Refresh from Endogon** in the database's edit form to re-fetch them.
 
 ## Next Steps
 

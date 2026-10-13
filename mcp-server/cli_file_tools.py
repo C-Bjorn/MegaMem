@@ -365,12 +365,32 @@ class CLIFileTools:
         self,
         path: str,
         vault_id: Optional[str] = None,
+        database_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Trigger MegaMem sync for a specific note via the registered plugin command."""
+        """Trigger MegaMem sync for a specific note.
+
+        Without database_id: unchanged zero-arg command-by-ID transport
+        (self.cli.trigger_sync) — Obsidian's Command.callback takes no
+        arguments, so this path can never carry a database target.
+
+        With database_id: routes through the CLI eval transport (Day86.04
+        Task 5, self.cli.trigger_sync_for_database) — the same
+        app.plugins.getPlugin('megamem-mcp') pattern used throughout
+        obsidian_cli.py — carrying {path, database_id} directly to
+        SyncStatusManager.enqueue()'s already-targetDb-aware sync path.
+        WebSocket is deprecated for this deployment; no WS/RPC bridge is
+        used or required.
+        """
         vault, err = self._resolve_vault(vault_id)
         if err:
             return err
-        return await asyncio.to_thread(self.cli.trigger_sync, vault, path)
+
+        if not database_id:
+            return await asyncio.to_thread(self.cli.trigger_sync, vault, path)
+
+        return await asyncio.to_thread(
+            self.cli.trigger_sync_for_database, vault, path, database_id
+        )
 
     # ─── Legacy method aliases (match FileTools method names called by MCP server) ──
 

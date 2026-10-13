@@ -1,13 +1,56 @@
 # MCP Server Requirements
 # MCP SDK (Model Context Protocol)
-mcp>=1.0.0
+# PINNED RANGE (Day83.01): mcp 2.0.0 (released 2026-07-28) removed the pre-2.0
+# decorator registration API (@self.server.list_tools() / .call_tool() / etc.) that
+# megamem_mcp_server.py's _register_tool_handlers() relies on. An unbounded spec lets
+# uv/pip resolve straight to 2.x and kills the server at tool registration on every
+# clean install. Floor raised to 1.28 (lowest version confirmed working alongside the
+# 1.26.0/1.29.0 versions seen in the field) rather than left at the historical 1.0.0
+# floor, so a resolver never lands on an early-1.x release nobody has verified against
+# this server. Ceiling excludes the entire 2.x line until the v2 low-level API migration
+# (tracked separately, not a hotfix). See megamem_mcp_server.py's startup version guard
+# for the runtime enforcement of this same range.
+mcp>=1.28,<2.0.0
 
 # Install ALL provider extras for maximum compatibility (matches original install.py behavior)
 # This allows users to switch between providers without reinstalling dependencies
-# Upgraded to 0.22.x for MinHash dedupe, multilingual support, and unicode improvements
-graphiti-core[falkordb,anthropic,google-genai,azure-openai,groq,voyage]>=0.29.0,<0.30.0
+# PINNED EXACT (Day79.02 Task 1 / Rev 5 SS1,7): a range does not exclude the abandoned
+# 0.30.0rc0-rc5 PyPI pre-release line (dated 2025-09-25, sorts above 0.29.3 under PEP 440),
+# and only an exact pin actually forces `pip install` to upgrade an existing 0.29.0 venv.
+# This is the single source of truth for the graphiti-core version - graphiti_bridge/install.py
+# reads it rather than declaring its own pin.
+# EXTRAS FIXED (Day79.02 wrap-up): 'azure-openai' and 'voyage' are not valid extra names on
+# 0.29.3 (`pip install` warned "does not provide the extra"). Confirmed via this release's
+# METADATA Provides-Extra list: no `azure-openai` extra exists at all - Azure OpenAI LLM/embedder
+# support ships in graphiti-core's BASE install (graphiti_core.llm_client.azure_openai_client and
+# graphiti_core.embedder.azure_openai both import cleanly with no extra installed), so the name is
+# simply dropped rather than replaced. The Voyage extra is named `voyageai`, not `voyage`.
+graphiti-core[falkordb,anthropic,google-genai,groq,voyageai]==0.29.3
 python-dotenv>=1.0.0
 pydantic>=2.0.0
+
+# Day79.02 Task 4: pin transitive `redis` below 8.1.0. `redis` is not a graphiti-core
+# dependency at all - it arrives transitively via the `falkordb` extra's own dependency
+# (falkordb-py 1.6.2 declares only `redis>=7.1.0`, no upper bound). redis-py 8.1.0 added an
+# HImportRegistry feature whose async ConnectionPool auto-injects a `himport_registry` kwarg
+# into `connection_kwargs`. falkordb-py's cluster-detection probe (`Is_Cluster()`) copies
+# those async pool kwargs wholesale into a SYNCHRONOUS `redis.Redis(**kwargs)` constructor
+# call to check `redis_mode` - the sync client's `__init__` does not accept
+# `himport_registry`, so ANY `FalkorDriver(...)` construction raises
+# `TypeError: Redis.__init__() got an unexpected keyword argument 'himport_registry'`
+# immediately, before any query runs. Bisected: redis==8.0.0 constructs cleanly;
+# redis==8.1.0 fails 100% of the time. This is unrelated to FalkorDB's own server-side
+# "requires Redis 8.0.0+" requirement in its docs - that refers to the FalkorDB/Redis
+# SERVER version, not this redis PYTHON CLIENT package; the two are different artifacts
+# with unrelated version lines. Confirmed this is a real shipped-product bug, not a
+# repo-venv quirk: a fresh `pip install -r requirements.txt` today resolves redis==8.1.0
+# with no conflict (a "clean" resolution that is nonetheless runtime-broken for FalkorDB).
+# graphiti-core's own upstream uv.lock (e:/GIT/LOCAL/graphiti/uv.lock) pins redis==7.1.0,
+# well under this boundary - matches this pin's intent. Removable once falkordb-py fixes
+# Is_Cluster() to build a redis-version-safe kwargs dict (bug not yet filed upstream as of
+# 2026-08-12), or once redis-py stops auto-injecting async-only kwargs into shared
+# connection_kwargs.
+redis>=7.1.0,<8.1.0
 
 # Additional dependencies
 neo4j>=5.0.0

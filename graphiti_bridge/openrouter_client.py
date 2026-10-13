@@ -18,15 +18,17 @@ from pydantic import BaseModel
 from graphiti_core.llm_client.client import get_extraction_language_instruction, LLMClient
 from graphiti_core.llm_client.config import DEFAULT_MAX_TOKENS, LLMConfig, ModelSize
 from graphiti_core.llm_client.errors import RateLimitError, RefusalError
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.prompts.models import Message
 
 
 logger = logging.getLogger('graphiti_bridge.sync')
 
-
-class InfrastructureError(Exception):
-    """Raised when the service provider has infrastructure issues"""
-    pass
+# InfrastructureError now lives in graphiti_bridge/errors.py (stdlib-only, no
+# graphiti_core/openai/httpx deps) so sync.py can import it eagerly and cheaply
+# without pulling in this module's heavy import chain. Re-exported here for
+# backward compatibility with any code importing it from openrouter_client. See Day85.03.
+from .errors import InfrastructureError  # noqa: F401
 
 
 def _parse_html_error(html_content: str) -> str:
@@ -64,6 +66,46 @@ class OpenRouterClient(LLMClient):
 
     MAX_RETRIES: ClassVar[int] = 2
     _class_response_count: ClassVar[int] = 0
+
+    @staticmethod
+    def _normalize_attribute_response(
+        response: dict[str, typing.Any],
+        response_model: type[BaseModel],
+    ) -> dict[str, typing.Any]:
+        """Normalize and validate a typed Graphiti attribute response.
+
+        Some Claude models routed through OpenRouter's OpenAI-compatible API follow
+        Graphiti's input ``ENTITY`` envelope instead of the requested response schema.
+        They return ``{name, entity_types, attributes: {...}}`` even though Graphiti
+        requested the entity/edge attribute model directly. Graphiti later merges the
+        raw dictionary into Neo4j properties; the nested ``attributes`` map is invalid
+        as a Neo4j property and causes Cypher 22G03.
+
+        This adapter applies only to Graphiti calls marked ``attribute_extraction``.
+        It does not touch node discovery, free-form relationship names/facts, edge
+        discovery, deduplication, or timestamps. The shape check is provider-agnostic
+        because OpenRouter may route other model families through similar compatibility
+        shims, although the defect has currently only been observed with Claude models.
+        """
+        wrapper_attributes = response.get('attributes')
+        wrapper_fields = {'name', 'entity_types', 'attributes'}
+        if (
+            isinstance(wrapper_attributes, dict)
+            and 'attributes' not in response_model.model_fields
+            and set(response).issubset(wrapper_fields)
+        ):
+            logger.warning(
+                '[OPENROUTER-ATTRIBUTE-WRAPPER] response_model=%s wrapper_fields=%s',
+                response_model.__name__,
+                sorted(response),
+            )
+            response = wrapper_attributes
+
+        # Graphiti's attribute merge needs only explicitly returned schema fields.
+        # Validation here removes envelope/extraneous keys and turns wrong declared
+        # value types into a retryable model-conformance error before Neo4j is called.
+        validated = response_model.model_validate(response)
+        return validated.model_dump(exclude_unset=True)
     
     def __init__(
         self, config: LLMConfig | None = None, cache: bool = False, client: typing.Any = None,
@@ -238,11 +280,10 @@ class OpenRouterClient(LLMClient):
             # models) wrap JSON output in ```json ... ``` when the downstream
             # provider doesn't enforce response_format=json_schema natively
             # (e.g. Anthropic via OpenAI-compat shims, some local gateways).
-            stripped = result.strip()
-            if stripped.startswith('```'):
-                stripped = re.sub(r'^```(?:json|JSON)?\s*\n?', '', stripped)
-                stripped = re.sub(r'\n?\s*```\s*$', '', stripped)
-                result = stripped.strip()
+            # Delegates to OpenAIGenericClient's shared implementation (added
+            # upstream in 0.29.x) instead of a duplicated regex, so this can't
+            # drift out of sync with upstream's own fence-stripping behavior.
+            result = OpenAIGenericClient._strip_code_fences(result)
 
             return json.loads(result)
 
@@ -271,9 +312,26 @@ class OpenRouterClient(LLMClient):
         model_size: ModelSize = ModelSize.medium,
         group_id: str | None = None,
         prompt_name: str | None = None,
+        *,
+        attribute_extraction: bool = False,
     ) -> dict[str, typing.Any]:
         logger = logging.getLogger('graphiti_bridge.sync')
-        
+
+        # Day79.02 Task 3: this override bypasses LLMClient.generate_response()
+        # entirely (OpenRouter-specific schema-strictness, provider routing via
+        # extra_body, and HTML infrastructure-error detection are not covered by
+        # OpenAIGenericClient upstream, so the override stays). Without this call
+        # every attribute-extraction call also silently missed the 0.29.1 guard
+        # instructions that prevent field-description text leaking into values —
+        # call the shared implementation rather than re-copying its text so this
+        # can't drift again on the next graphiti-core release. Accepting the
+        # `attribute_extraction` kwarg is also required for correctness, not just
+        # the guard: node_operations.py/edge_operations.py call
+        # generate_response(..., attribute_extraction=True) unconditionally on the
+        # attribute-extraction path, which raised TypeError against this override
+        # prior to this fix (the kwarg didn't exist in the signature at all).
+        self._apply_attribute_extraction_preamble(messages, attribute_extraction)
+
         if max_tokens is None:
             max_tokens = self.max_tokens
 
@@ -296,6 +354,23 @@ class OpenRouterClient(LLMClient):
                     messages, response_model, max_tokens=max_tokens, model_size=model_size,
                     prompt_name=prompt_name,
                 )
+                if attribute_extraction and response_model is not None:
+                    response = self._normalize_attribute_response(response, response_model)
+                    schema_fields = set(response_model.model_fields)
+                    unexpected_fields = sorted(set(response) - schema_fields)
+                    nested_fields = sorted(
+                        key for key, value in response.items()
+                        if isinstance(value, dict)
+                        or (isinstance(value, list) and any(isinstance(item, dict) for item in value))
+                    )
+                    if unexpected_fields or nested_fields:
+                        logger.warning(
+                            '[OPENROUTER-ATTRIBUTE-SHAPE] response_model=%s '
+                            'unexpected_fields=%s nested_fields=%s',
+                            response_model.__name__,
+                            unexpected_fields,
+                            nested_fields,
+                        )
                 return response
             except (RateLimitError, RefusalError):
                 raise

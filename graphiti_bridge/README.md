@@ -56,6 +56,7 @@ echo '{"llmProvider": "openai", "databaseType": "neo4j"}' | python graphiti_brid
 
 - Python 3.10 or higher
 - Internet connection for package installation
+- The `graphiti-core` version (exactly 0.29.3) is read from `mcp-server/requirements.txt`, the single source of truth; the installer bootstraps pip via `ensurepip` when needed
 
 ## Usage
 

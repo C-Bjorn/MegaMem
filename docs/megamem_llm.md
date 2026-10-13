@@ -31,6 +31,15 @@ MegaMem is an advanced Obsidian plugin that bridges your personal knowledge vaul
 - AI-enhanced query understanding
 - Contextual result ranking and relevance scoring
 
+### 📤 Publish, Dynamic Rules, FalkorDB TLS, Hosted Graph _(v1.8.0)_
+
+- **Publish**: the Publish tab replicates a chosen `group_id` namespace from a source graph to a separate destination database (e.g. Neo4j Aura) — two-pass write with reconciliation, embedder-parity checks, and preflight refusal codes. Graph → graph only; never touches your vault.
+- **Dynamic Ontology Rules**: Schema Manager → Dynamic Rules tab filters which entity/edge types are sent to extraction per note type (stored in `dynamic-rules.json`; a default catch-all rule keeps behaviour unchanged).
+- **FalkorDB TLS**: `ssl` toggle and a single URL/host input for TLS-only FalkorDB instances.
+- **Endogon Hosted Graph** (Pro): "Endogon" Type in the Add Database form, a Hosted Graph section in the Pro tab, and **Refresh from Endogon** on the database edit form.
+- **`ask_bjorn` MCP tool** (Pro key with the `service.ask_bjorn` capability).
+- **Upgrade notes**: click **Install Dependencies** again (dependencies are pinned: `graphiti-core` 0.29.3, `mcp>=1.28,<2`); re-sync FalkorDB vaults (real namespace isolation); `mm_group_id` is honoured everywhere and `g_group_id` is deprecated.
+
 ### 🔗 OpenRouter Embedding Models _(v1.6.9)_
 
 OpenRouter is now a full embedding provider. Model Library → Embedding Models → OpenRouter lets you fetch the live catalog from `/api/v1/embeddings/models` (requires API key) and toggle models on. Static seed list of all 25 known embedding models available without a key.
@@ -72,7 +81,7 @@ Built on the local SQLite `sync.db`, the Analytics tab delivers full visibility 
 ### Multi-Database Support
 
 - **Neo4j**: Industry-standard graph database for complex relationships
-- **FalkorDB**: High-performance in-memory graph database for speed
+- **FalkorDB**: High-performance in-memory graph database for speed (TLS supported)
 - **Multiple simultaneous databases**: Configure named DB targets, each with its own connection, type, and embedding model. Sync individual notes to any database via a per-note dropdown.
 - **Kuzu**: Coming soon
 - **Amazon Neptune**: Coming soon
@@ -608,7 +617,7 @@ Configure how knowledge is organized in the graph database.
 
 ### Enable Property Namespacing <i data-lucide="check-circle"></i>
 
-- Description: Use g_group_id frontmatter property as namespace when available
+- Description: Use `mm_group_id` frontmatter property as namespace when available (`g_group_id` is deprecated — still honoured as a fallback with a warning; resolved by the shared `NamespaceResolver`)
 - Developer Note: Property-based namespace detection.
 
 ### Namespace Discovery
@@ -808,7 +817,7 @@ Additional settings that appear based on your provider selection:
 
 # MCP Commands Reference
 
-This document lists all 22 available commands (tools) provided by the MegaMem MCP server: 11 MegaMem Graph Operations and 11 Obsidian File Operations (via CLI). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
+This document lists all 24 available commands (tools) provided by the MegaMem MCP server: 12 MegaMem Graph Operations, 11 Obsidian File Operations (via CLI), and `ask_bjorn` (only registered when a Pro key with the Ask Bjørn capability is configured — otherwise 23 tools are listed). Each command includes its description, parameters, and aliases, allowing for seamless interaction with the MegaMem knowledge graph and Obsidian vault.
 
 > **Developer's Note:** You—the large language model accessing this documentation—don't necessarily need to "read" this in the traditional sense; your internal mechanisms often handle tool schema parsing automatically. This detailed reference is primarily for human developers, providing a comprehensive overview for understanding, debugging, and advanced usage. It also serves to illustrate the robust, fine-grained control MegaMem offers, showcasing its capabilities where other systems might fall short.
 
@@ -922,7 +931,11 @@ Get episodes from the memory graph (aliases: mm, megamem, memory)
 
 Clear the entire memory graph (aliases: mm, megamem, memory)
 
-**Parameters:** None
+**Parameters:**
+
+| Name          | Type     | Description                                                                      | Required | Default |
+| ------------- | -------- | -------------------------------------------------------------------------------- | -------- | ------- |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |         |
 
 ### `get_entity_edge`
 
@@ -974,6 +987,31 @@ List all configured database targets. Use this to discover which databases are a
 **Parameters:** None
 
 **Response includes:** `id`, `label`, `type`, `category`, `enabled`, `vault_id`, `connection` per database.
+
+### `manage_sagas`
+
+Manage sagas in the memory graph — list all sagas or summarize a specific saga. (aliases: mm, megamem, memory)
+
+**Parameters:**
+
+| Name          | Type     | Description                                                                      | Required | Default        |
+| ------------- | -------- | -------------------------------------------------------------------------------- | -------- | -------------- |
+| `operation`   | `string` | `list` or `summarize`                                                            | Yes      |                |
+| `saga_name`   | `string` | Name of the saga to summarize (required for `summarize`)                         | No       |                |
+| `group_id`    | `string` | Namespace to scope the operation                                                 | No       | server default |
+| `database_id` | `string` | Optional: target a specific named database (id or label from Databases settings) | No       |                |
+
+`list` returns each saga's `uuid`, `name`, `group_id`, `summary`, `episode_count`, and `last_summarized_at`. `summarize` incrementally summarizes a saga using only episodes added since the last summary.
+
+### `ask_bjorn`
+
+Ask Bjørn, Endogon's support agent, a question about MegaMem, Endogon, or the product — not your own vault or graph data. A full autonomous agent turn: Bjørn may search Endogon's roadmap/product/FAQ records, submit a roadmap item, or leave a message for the team before answering. Only registered when a valid Pro key with the `service.ask_bjorn` capability is configured (Plugin Settings → Pro tab). Always unmetered.
+
+**Parameters:**
+
+| Name       | Type     | Description                                   | Required | Default |
+| ---------- | -------- | --------------------------------------------- | -------- | ------- |
+| `question` | `string` | The question to ask Bjørn                     | Yes      |         |
 
 ## Obsidian File Operations (via Obsidian CLI)
 
@@ -1191,6 +1229,7 @@ Sync a specific note to MegaMem/Graphiti knowledge graph by path. Opens the note
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
 | `path`     | `string` | Vault-relative path to the note (e.g. `'My Notes/SomeNote.md'`). Do NOT use absolute system paths or prefix with the vault folder name. | Yes      |         |
 | `vault_id` | `string` | Vault ID (optional)                                                                                                               | No       |         |
+| `database_id` | `string` | Optional: target a specific configured database (`settings.databases[].id`) via the plugin's RPC bridge instead of the default database. An unrecognized ID fails with a named error rather than falling back to the default. | No       |         |
 
 ---
 
