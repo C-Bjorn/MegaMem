@@ -524,9 +524,21 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
     OpenAIEmbedder/VoyageAIEmbedder slice every real API response to it client-side --
     silently truncating any model with a native output >1024D unless embedding_dim is
     passed explicitly. NO_TRUNCATION_EMBEDDING_DIM below makes that slice a permanent
-    no-op so callers always get the embedder's true native output length. See Day79.01.
+    no-op so callers get the embedder's native output length by default. An explicit
+    embedding_dimensions preserves the same prefix truncation for existing graphs;
+    it does not request a different embedding from the provider. See Day79.01.
     """
     logger = logging.getLogger('graphiti_bridge.sync')
+
+    dimensions = config.embedding_dimensions
+    if dimensions is not None:
+        if type(dimensions) is not int or dimensions <= 0:
+            raise ValueError('embedding_dimensions must be a positive integer')
+        if config.embedder_provider not in ('openai', 'openrouter', 'ollama', 'voyage'):
+            raise ValueError(
+                f'Explicit embedding_dimensions are not supported for {config.embedder_provider}'
+            )
+    output_dimensions = dimensions if dimensions is not None else NO_TRUNCATION_EMBEDDING_DIM
 
     # Get embedder API key
     embedder_api_key = config.get_effective_embedder_api_key()
@@ -546,7 +558,7 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         embedder_config = OpenAIEmbedderConfig(
             api_key=embedder_api_key,
             embedding_model=config.embedding_model,
-            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
+            embedding_dim=output_dimensions,
         )
         embedder = OpenAIEmbedder(config=embedder_config)
 
@@ -576,7 +588,7 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         embedder_config = VoyageAIEmbedderConfig(
             api_key=embedder_api_key,
             model=config.embedding_model,
-            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
+            embedding_dim=output_dimensions,
         )
         embedder = VoyageAIEmbedder(config=embedder_config)
 
@@ -602,15 +614,15 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         # Use OpenAI embedder with Ollama base URL (official Graphiti pattern). Same
         # client-side truncation risk as the openai/voyage/openrouter branches (an
         # Ollama model like mxbai-embed-large outputs 1024D, exceeding the 768D
-        # config.ollama_embedding_dim default) -- pass the no-truncation sentinel here
-        # too so the real native output length is always returned. See Day79.01 and
+        # config.ollama_embedding_dim default). Keep native output unless an explicit
+        # output size is configured for the existing graph. See Day79.01 and
         # Day81.02 Task 4.
         ollama_base_url = _get_ollama_base_url(
             getattr(config, 'ollama_base_url', None))
         embedder_config = OpenAIEmbedderConfig(
             api_key="ollama",  # Placeholder API key as per Graphiti docs
             embedding_model=config.embedding_model,  # Corrected parameter name
-            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
+            embedding_dim=output_dimensions,
             base_url=ollama_base_url
         )
         embedder = OpenAIEmbedder(config=embedder_config)
@@ -626,7 +638,7 @@ def create_embedder_client(config: BridgeConfig, debug: bool = False):
         embedder_config = OpenAIEmbedderConfig(
             api_key=embedder_api_key,
             embedding_model=config.embedding_model,
-            embedding_dim=NO_TRUNCATION_EMBEDDING_DIM,
+            embedding_dim=output_dimensions,
             base_url="https://openrouter.ai/api/v1"
         )
         embedder = OpenAIEmbedder(config=embedder_config)

@@ -131,6 +131,10 @@ class BridgeConfig:
     ws_auth_token: str = ""
     graph_view_id: str = "vault"
 
+    # Explicit client-side output size for graphs created with truncated vectors.
+    # None preserves the provider's native output size.
+    embedding_dimensions: Optional[int] = None
+
     @classmethod
     def _resolve_field(cls, config_dict: Dict[str, Any], snake_key: str,
                         camel_key: Optional[str] = None, default: Any = None) -> Any:
@@ -213,6 +217,8 @@ class BridgeConfig:
             # Embedder Configuration
             embedder_provider=embedder_provider,
             embedding_model=embedding_model,
+            embedding_dimensions=cls._get_embedder_field(
+                config_dict, 'embedding_dimensions', 'embeddingDimensions', db_entry=db_entry),
 
             # Database Configuration
             database_type=cls._resolve_field(
@@ -561,7 +567,7 @@ class BridgeConfig:
     @classmethod
     def _get_embedder_field(cls, config_dict: Dict[str, Any], snake_key: str, camel_key: str,
                              db_entry: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-        """Resolve an embedder-config field (provider/model) with per-database priority,
+        """Resolve an embedder-config field with per-database priority,
         the single resolver every caller routes through (Day83.02):
         1. Explicit snake_case override on this payload (non-Obsidian-shaped callers,
            e.g. sync_daemon/publish requests and test fixtures already resolve
