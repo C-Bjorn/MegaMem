@@ -7,6 +7,7 @@ import pytest
 from openai.types import CreateEmbeddingResponse
 
 from graphiti_bridge.config import BridgeConfig
+from graphiti_bridge import publish
 from graphiti_bridge.sync import create_embedder_client
 
 
@@ -36,6 +37,7 @@ def config_payload():
                 "embedderProvider": "openai",
                 "embeddingModel": "text-embedding-3-small",
                 "embeddingDimensions": 512,
+                "embeddingDimensionsEnabled": True,
             },
         ],
     }
@@ -63,6 +65,7 @@ async def returned_vectors(config):
 def test_explicit_legacy_dimensions_preserve_single_and_batch_vectors():
     payload = config_payload()
     payload["databases"][0]["embeddingDimensions"] = 1024
+    payload["databases"][0]["embeddingDimensionsEnabled"] = True
     single, batch = asyncio.run(returned_vectors(BridgeConfig.from_dict(payload)))
     expected = [float(i) for i in range(1024)]
     assert single == expected
@@ -82,6 +85,63 @@ def test_named_database_uses_its_own_dimensions():
     config = BridgeConfig.from_dict(payload, db_entry=payload["databases"][1])
     single, _ = asyncio.run(returned_vectors(config))
     assert len(single) == 512
+
+
+def test_legacy_database_dimensions_require_explicit_opt_in():
+    payload = config_payload()
+    payload["databases"][0]["embeddingDimensions"] = 768
+    assert BridgeConfig.from_dict(payload).embedding_dimensions is None
+
+    payload["databases"][0]["embeddingDimensionsEnabled"] = True
+    assert BridgeConfig.from_dict(payload).embedding_dimensions == 768
+
+    payload["databases"][0].update({
+        "embedderProvider": "google",
+        "embeddingModel": "text-embedding-005",
+        "embeddingDimensions": 768,
+    })
+    payload["databases"][0].pop("embeddingDimensionsEnabled")
+    assert BridgeConfig.from_dict(payload).embedding_dimensions is None
+
+
+def test_publish_mode_reembeds_when_same_model_output_sizes_differ():
+    source = BridgeConfig.from_dict({
+        **config_payload(),
+        "embedding_dimensions": 1024,
+    })
+    destination = BridgeConfig.from_dict(config_payload())
+    mode, info = publish.resolve_publish_mode(source, destination, None)
+    assert mode == publish.PUBLISH_MODE_RE_EMBED
+    assert info["reason"] == "different_embedding_dimensions"
+
+
+def test_publish_mode_reembeds_when_destination_history_has_different_dimensions():
+    source = BridgeConfig.from_dict({**config_payload(), "embedding_dimensions": 1024})
+    destination = BridgeConfig.from_dict({**config_payload(), "embedding_dimensions": 1024})
+    mode, info = publish.resolve_publish_mode(
+        source,
+        destination,
+        {
+            "embedder_provider": "openai",
+            "embedder_model": "text-embedding-3-small",
+            "embedding_dim": 1536,
+        },
+    )
+    assert mode == publish.PUBLISH_MODE_RE_EMBED
+    assert info["reason"] == "destination_embedding_dimensions_changed"
+
+
+def test_publish_probe_accepts_configured_truncated_output(monkeypatch):
+    class TruncatedEmbedder:
+        async def create(self, _texts):
+            return [0.0] * 1024
+
+    config = BridgeConfig.from_dict({
+        **config_payload(),
+        "embedding_dimensions": 1024,
+    })
+    monkeypatch.setattr(publish, "_build_real_dest_embedder", lambda _config: TruncatedEmbedder())
+    assert asyncio.run(publish._probe_dest_embedder_liveness(config)) is None
 
 
 def test_sync_payload_dimensions_override_database_defaults():

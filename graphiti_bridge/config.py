@@ -597,6 +597,14 @@ class BridgeConfig:
 
         target_db = db_entry if db_entry is not None else cls._get_primary_database_entry(config_dict)
         if camel_key in target_db:
+            if snake_key == 'embedding_dimensions' and not target_db.get(
+                'embeddingDimensionsEnabled',
+                target_db.get('embedding_dimensions_enabled', False),
+            ):
+                # Older plugin versions persisted 768 as the add-database form's
+                # untouched default. Treat stored per-database values as inactive
+                # until the user explicitly opts in through the current settings UI.
+                return config_dict.get(camel_key)
             return target_db[camel_key]
 
         # Legacy top-level fallback (Day83.02: migration input only, never a runtime default)
