@@ -1,6 +1,6 @@
 ---
 date_created: 2025-09-23T11:21
-date_updated: 2026-10-13
+date_updated: 2026-10-15
 ---
 # MegaMem Plugin Settings
 
@@ -169,6 +169,14 @@ Configure language model providers and specific models.
 ### Embedding Model <i data-lucide="check-circle"></i>
 - Description: Model for generating embeddings (global default)
 - Developer Note: Legacy global setting — now overridable per-database in the Databases section.
+
+### Embedding Output Dimensions
+
+Leave **Dimensions** blank to use the model's native output size. Set a positive integer to preserve an existing graph's output size. OpenAI, OpenRouter, Ollama, and Voyage embedders support this setting.
+
+Some versions before v1.8 silently shortened `text-embedding-3-small` output to 1024 dimensions. For a graph created that way, set **Dimensions** to `1024` in its database configuration. The embedder then keeps that many values from each provider response, matching the previous vector prefix. Compatibility also requires the provider and model that created the stored vectors.
+
+The database setting is `databases[].embeddingDimensions`. Values saved by older versions stay inactive until you enter the dimension again in Database settings. Bridge payloads use `embedding_dimensions`, which overrides the selected database setting. This value applies to single and batch embeddings, MCP queries, syncs, and compatibility checks. Reload the plugin and restart MCP clients after changing it.
 
 ### Custom LLM Model (Ollama only) <i data-lucide="check-circle"></i>
 - Description: Download any Ollama LLM model by name (e.g., llama3.2:3b, codellama:13b)

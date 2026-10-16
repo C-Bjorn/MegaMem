@@ -538,6 +538,16 @@ def _expected_source_embedder_dim(source_config: BridgeConfig) -> Optional[int]:
     return provider_table.get(source_config.embedding_model)
 
 
+def _effective_embedder_dim(config: BridgeConfig) -> Optional[int]:
+    """Return the configured output size, when the model's native size is known."""
+    if config.embedding_dimensions is not None:
+        return config.embedding_dimensions
+    provider_table = KNOWN_EMBEDDER_DIMS.get(config.embedder_provider)
+    if not provider_table:
+        return None
+    return provider_table.get(config.embedding_model)
+
+
 # ---------------------------------------------------------------------------
 # Step 3 + Step 4 (Day79.01 subtask, 2026-08-10): derived embedder MODE. Never a UI
 # selector or a second independently-settable fact - see resolve_publish_mode() docstring.
@@ -561,16 +571,12 @@ def resolve_publish_mode(
     corrected parity rule requires derivation, not a second copy of the same fact that can
     drift out of sync with reality exactly like the old "source == destination" rule did.
 
-    "Same embedder" (COPY-eligible) is decided by (embedder_provider, embedding_model)
-    IDENTITY, never by comparing raw dimensions. Two unrelated models can coincidentally
-    share a dimension (e.g. nomic-embed-text and bge-base-en-v1.5 are both 768D - see
-    KNOWN_EMBEDDER_DIMS above), so dimension equality alone is not a safe proxy for "these
-    vectors are semantically compatible" - that was exactly the kind of proxy-instead-of-
-    fact reasoning that produced the original wrong rule this subtask corrects. Dimension
-    IS still used, but only for two narrower, existing purposes that are unaffected by this
-    function: Step 2's measured-vs-configured advisory warning above, and the pre-existing
-    embedder_dimension_mismatch/embedder_model_mismatch HARD REFUSALS in preflight() (which
-    fire independently of what mode this function returns).
+    COPY requires matching (embedder_provider, embedding_model) identity and compatible
+    output sizes. Two unrelated models can coincidentally share a dimension (e.g.
+    nomic-embed-text and bge-base-en-v1.5 are both 768D), so dimension equality alone is
+    never a safe proxy for semantic compatibility. When the same configured model has
+    different output sizes, or the destination metadata records a stale size, RE-EMBED the
+    scoped records.
 
     Three cases, in priority order:
 
@@ -582,8 +588,9 @@ def resolve_publish_mode(
     2. Step 4 - destination-embedder-CHANGE detection, checked BEFORE the source/destination
        comparison and independent of it: if PublishMetadata's singleton (from the most
        recent prior publish to this destination) recorded a DIFFERENT embedder_provider/
-       embedder_model than dest_config's CURRENT configuration, the destination currently
-       holds vectors from a stale model. Force RE-EMBED even if source's embedder happens
+       embedder_model or embedding_dim than dest_config's CURRENT configuration, the
+       destination currently holds vectors from a stale model or output size. Force
+       RE-EMBED even if source's embedder happens
        to equal the destination's NEW configuration - the danger being guarded against is
        two incompatible vector spaces coexisting on one destination, and that risk comes
        entirely from the DESTINATION's own history, not from source/destination agreement.
@@ -592,8 +599,8 @@ def resolve_publish_mode(
        module) - so returning RE-EMBED here automatically satisfies "force a full re-embed
        of the entire scoped set, not incremental" with no separate code path required.
 
-    3. Otherwise: COPY if source_config and dest_config agree on (embedder_provider,
-       embedding_model); RE-EMBED if they disagree.
+    3. Otherwise: COPY if source_config and dest_config agree on provider, model, and
+       effective output size; RE-EMBED if any of those differ.
 
     Returns (mode, info) where info carries a human-readable 'reason' plus whatever extra
     fields are relevant to that reason, for preflight()'s disclosure payload / progress
@@ -615,12 +622,36 @@ def resolve_publish_mode(
                 'prior_embedder': f'{prior_provider}/{prior_model}',
                 'new_embedder': f'{dest_config.embedder_provider}/{dest_config.embedding_model}',
             }
+        prior_dim = dest_existing_metadata.get('embedding_dim')
+        current_dim = _effective_embedder_dim(dest_config)
+        if prior_dim is not None and current_dim is not None and prior_dim != current_dim:
+            return PUBLISH_MODE_RE_EMBED, {
+                'reason': 'destination_embedding_dimensions_changed',
+                'prior_dimensions': prior_dim,
+                'new_dimensions': current_dim,
+            }
 
     same_embedder = (
         source_config.embedder_provider == dest_config.embedder_provider
         and source_config.embedding_model == dest_config.embedding_model
     )
     if same_embedder:
+        source_dim = _effective_embedder_dim(source_config)
+        dest_dim = _effective_embedder_dim(dest_config)
+        if source_dim is not None and dest_dim is not None and source_dim != dest_dim:
+            return PUBLISH_MODE_RE_EMBED, {
+                'reason': 'different_embedding_dimensions',
+                'source_dimensions': source_dim,
+                'dest_dimensions': dest_dim,
+            }
+        if (
+            source_dim is None or dest_dim is None
+        ) and source_config.embedding_dimensions != dest_config.embedding_dimensions:
+            return PUBLISH_MODE_RE_EMBED, {
+                'reason': 'different_embedding_dimensions',
+                'source_dimensions': source_config.embedding_dimensions,
+                'dest_dimensions': dest_config.embedding_dimensions,
+            }
         return PUBLISH_MODE_COPY, {'reason': 'same_embedder'}
     return PUBLISH_MODE_RE_EMBED, {
         'reason': 'different_embedder',
@@ -747,7 +778,7 @@ async def _probe_dest_embedder_liveness(dest_config: BridgeConfig) -> Optional[D
             ),
         }
 
-    expected_dim = KNOWN_EMBEDDER_DIMS.get(dest_config.embedder_provider, {}).get(dest_config.embedding_model)
+    expected_dim = _effective_embedder_dim(dest_config)
     if expected_dim is not None and len(vector) != expected_dim:
         return {
             'code': 'embedder_unreachable',
